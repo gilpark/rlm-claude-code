@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
-from .api_client import ClaudeClient, init_client
+from .api_client import ClaudeClient, Provider, init_client
 from .complexity_classifier import should_activate_rlm
 from .config import RLMConfig, default_config
 from .context_manager import externalize_context
@@ -18,6 +18,7 @@ from .cost_tracker import CostComponent, get_cost_tracker
 from .prompts import build_rlm_system_prompt
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
+from .smart_router import SmartRouter
 from .trajectory import (
     StreamingTrajectory,
     TrajectoryEvent,
@@ -50,6 +51,7 @@ class RLMOrchestrator:
         self,
         config: RLMConfig | None = None,
         client: ClaudeClient | None = None,
+        smart_routing: bool = True,
     ):
         """
         Initialize orchestrator.
@@ -57,17 +59,32 @@ class RLMOrchestrator:
         Args:
             config: RLM configuration (uses default if None)
             client: Claude API client (creates one if None)
+            smart_routing: Enable intelligent model routing based on query type
         """
         self.config = config or default_config
         self.client = client
         self.activation_reason: str = ""
         self.parser = ResponseParser()
+        self.smart_routing = smart_routing
+        self._router: SmartRouter | None = None
 
     def _ensure_client(self) -> ClaudeClient:
         """Ensure we have an API client."""
         if self.client is None:
             self.client = init_client(default_model=self.config.model.root_model)
         return self.client
+
+    def _get_router(self, client: ClaudeClient) -> SmartRouter:
+        """Get or create smart router."""
+        if self._router is None:
+            # Determine available providers from client
+            available = []
+            if hasattr(client, "_clients"):
+                available = list(client._clients.keys())
+            else:
+                available = [Provider.ANTHROPIC]
+            self._router = SmartRouter(available_providers=available)
+        return self._router
 
     async def run(
         self, query: str, context: SessionContext
@@ -104,17 +121,34 @@ class RLMOrchestrator:
         )
         trajectory = StreamingTrajectory(renderer)
 
+        # Smart routing: select optimal model for this query
+        selected_model = None
+        routing_reason = ""
+        if self.smart_routing:
+            router = self._get_router(client)
+            routing_decision = router.route(query)
+            selected_model = routing_decision.primary_model
+            routing_reason = f"{routing_decision.query_type.value} → {selected_model} ({routing_decision.reason})"
+
         # Initialize state
         state = OrchestrationState(
             max_turns=self.config.depth.max * 10,  # Allow multiple turns per depth
         )
 
         # Start event
+        start_content = f"depth=0/{self.config.depth.max} • task: {self.activation_reason}"
+        if routing_reason:
+            start_content += f" • routing: {routing_reason}"
         start_event = TrajectoryEvent(
             type=TrajectoryEventType.RLM_START,
             depth=0,
-            content=f"depth=0/{self.config.depth.max} • task: {self.activation_reason}",
-            metadata={"query": query, "context_tokens": context.total_tokens},
+            content=start_content,
+            metadata={
+                "query": query,
+                "context_tokens": context.total_tokens,
+                "model": selected_model,
+                "routing": routing_reason,
+            },
         )
         await trajectory.emit(start_event)
         yield start_event
@@ -150,11 +184,12 @@ class RLMOrchestrator:
         while state.turn < state.max_turns and state.final_answer is None:
             state.turn += 1
 
-            # Get response from Claude
+            # Get response from Claude (using smart-routed model if enabled)
             try:
                 response = await client.complete(
                     messages=state.messages,
                     system=system_prompt,
+                    model=selected_model,  # Uses smart-routed model
                     max_tokens=4096,
                     component=CostComponent.ROOT_PROMPT,
                 )
@@ -177,6 +212,8 @@ class RLMOrchestrator:
                 metadata={
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
+                    "model": response.model,
+                    "provider": response.provider.value,
                 },
             )
             await trajectory.emit(reason_event)
