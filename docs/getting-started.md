@@ -46,8 +46,17 @@ uv run ty check src/
 If you want to use RLM with Claude Code:
 
 ```bash
+# Add the marketplace (one-time setup)
+claude plugin marketplace add rlm-claude-code github:rand/rlm-claude-code
+
+# Install the plugin
+claude plugin install rlm-claude-code@rlm-claude-code --scope user
+```
+
+**Alternative**: Install from local clone:
+```bash
 # From the rlm-claude-code directory
-claude plugins install . --scope user
+claude plugin install . --scope user
 ```
 
 Start Claude Code and you should see:

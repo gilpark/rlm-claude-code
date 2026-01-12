@@ -33,8 +33,11 @@ uv run pytest tests/ -v
 ### As a Claude Code Plugin
 
 ```bash
-# Install as a local plugin
-claude plugins install . --scope user
+# Add the marketplace (one-time setup)
+claude plugin marketplace add rlm-claude-code github:rand/rlm-claude-code
+
+# Install the plugin
+claude plugin install rlm-claude-code@rlm-claude-code --scope user
 ```
 
 After installation, start Claude Code and you should see "RLM initialized" on startup.
@@ -402,7 +405,7 @@ uv run pytest tests/benchmarks/ --benchmark-only
 
 ### RLM Not Initializing
 
-1. Check plugin installation: `claude plugins list`
+1. Check plugin installation: `claude plugin list`
 2. Check hooks: `ls hooks/hooks.json`
 3. Test init script: `uv run python scripts/init_rlm.py`
 
