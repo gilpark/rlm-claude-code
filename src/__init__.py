@@ -26,6 +26,15 @@ from .types import SessionContext
 # Complexity and routing
 from .complexity_classifier import should_activate_rlm
 from .orchestration_schema import ExecutionMode, OrchestrationPlan, ToolAccessLevel
+from .local_orchestrator import LocalOrchestrator, LocalModelConfig, RECOMMENDED_CONFIGS
+from .orchestration_logger import (
+    OrchestrationLogger,
+    LoggerConfig,
+    OrchestrationDecisionLog,
+    TrainingDataExporter,
+    get_logger,
+    set_logger,
+)
 
 # Trajectory and analysis
 from .trajectory import TrajectoryEvent, TrajectoryRenderer
@@ -61,6 +70,17 @@ __all__ = [
     "ExecutionMode",
     "OrchestrationPlan",
     "ToolAccessLevel",
+    # Local orchestration
+    "LocalOrchestrator",
+    "LocalModelConfig",
+    "RECOMMENDED_CONFIGS",
+    # Orchestration logging
+    "OrchestrationLogger",
+    "LoggerConfig",
+    "OrchestrationDecisionLog",
+    "TrainingDataExporter",
+    "get_logger",
+    "set_logger",
     # Trajectory
     "TrajectoryEvent",
     "TrajectoryRenderer",

@@ -78,7 +78,9 @@ class TestIntelligentOrchestrator:
 
         # Simple task should not activate RLM
         assert plan.activate_rlm is False
-        assert plan.activation_reason == "simple_task"
+        # Reason should indicate low value (knowledge retrieval, narrow scope, etc.)
+        assert plan.activation_reason in ("simple_task", "conversational") or \
+            plan.activation_reason.startswith("low_value:")
 
     def test_heuristic_orchestrate_complex_task(self, orchestrator):
         """Heuristic fallback handles complex tasks."""
@@ -420,3 +422,67 @@ class TestConvenienceFunction:
         )
 
         assert isinstance(plan, OrchestrationPlan)
+
+
+class TestLocalModelIntegration:
+    """Tests for local model integration in IntelligentOrchestrator."""
+
+    def test_config_local_model_defaults(self):
+        """Local model config has correct defaults."""
+        config = OrchestratorConfig()
+        assert config.use_local_model is False
+        assert config.local_model_preset == "ultra_fast"
+        assert config.fallback_to_api is True
+
+    def test_config_local_model_enabled(self):
+        """Can enable local model in config."""
+        config = OrchestratorConfig(
+            use_local_model=True,
+            local_model_preset="balanced",
+        )
+        assert config.use_local_model is True
+        assert config.local_model_preset == "balanced"
+
+    def test_lazy_local_orchestrator_init(self):
+        """Local orchestrator is lazily initialized."""
+        orchestrator = IntelligentOrchestrator(
+            config=OrchestratorConfig(use_local_model=True),
+        )
+        assert orchestrator._local_orchestrator is None
+
+        # Trigger initialization
+        local_orch = orchestrator._ensure_local_orchestrator()
+        assert local_orch is not None
+        assert orchestrator._local_orchestrator is not None
+
+    def test_statistics_include_local(self):
+        """Statistics include local_decisions counter."""
+        orchestrator = IntelligentOrchestrator()
+        stats = orchestrator.get_statistics()
+
+        assert "local_decisions" in stats
+        assert "local_rate" in stats
+        assert stats["local_decisions"] == 0
+
+    @pytest.mark.asyncio
+    async def test_local_model_fallback_to_heuristics(self):
+        """Falls back to heuristics when local model fails."""
+        config = OrchestratorConfig(
+            use_local_model=True,
+            fallback_to_api=False,  # Skip API
+            use_fallback=True,
+        )
+        orchestrator = IntelligentOrchestrator(config=config)
+
+        # Mock local orchestrator to fail
+        from unittest.mock import AsyncMock, MagicMock
+        mock_local = MagicMock()
+        mock_local.orchestrate = AsyncMock(side_effect=RuntimeError("No backend"))
+        orchestrator._local_orchestrator = mock_local
+
+        context = OrchestrationContext(query="test", context_tokens=1000)
+        plan = await orchestrator.create_plan("simple query", context)
+
+        # Should get a heuristic plan
+        assert isinstance(plan, OrchestrationPlan)
+        assert orchestrator._stats["fallback_decisions"] == 1
