@@ -324,6 +324,40 @@ from .circuit_breaker import (
     TierCircuitBreaker,
 )
 
+# User corrections (SPEC-11.20-11.25)
+from .user_corrections import (
+    ClassifierAdjustment,
+    Correction,
+    CorrectionAnalyzer,
+    CorrectionRecorder,
+    CorrectionType,
+    UserCorrectionLearner,
+)
+
+# REPL plugin system (SPEC-12.10-12.16)
+from .repl_plugin import (
+    BuiltinPlugins,
+    PluginConflictError,
+    PluginRegistry,
+    REPLPlugin,
+    REPLPluginManager,
+)
+
+# Memory backend abstraction (SPEC-12.20-12.25)
+from .memory_backend import (
+    Edge,
+    EdgeType,
+    InMemoryBackend,
+    MemoryBackend,
+    MemoryBackendConfig,
+    MemoryBackendType,
+    MemoryMigrator,
+    MigrationStats,
+    NodeType,
+    SQLiteBackend,
+    create_backend,
+)
+
 # Trajectory and analysis
 from .trajectory import TrajectoryEvent, TrajectoryRenderer
 from .trajectory_analysis import StrategyType, TrajectoryAnalyzer
@@ -598,4 +632,29 @@ __all__ = [
     "FallbackResult",
     "RecoveryTest",
     "TierCircuitBreaker",
+    # User corrections (SPEC-11.20-11.25)
+    "ClassifierAdjustment",
+    "Correction",
+    "CorrectionAnalyzer",
+    "CorrectionRecorder",
+    "CorrectionType",
+    "UserCorrectionLearner",
+    # REPL plugin system (SPEC-12.10-12.16)
+    "BuiltinPlugins",
+    "PluginConflictError",
+    "PluginRegistry",
+    "REPLPlugin",
+    "REPLPluginManager",
+    # Memory backend abstraction (SPEC-12.20-12.25)
+    "Edge",
+    "EdgeType",
+    "InMemoryBackend",
+    "MemoryBackend",
+    "MemoryBackendConfig",
+    "MemoryBackendType",
+    "MemoryMigrator",
+    "MigrationStats",
+    "NodeType",
+    "SQLiteBackend",
+    "create_backend",
 ]
