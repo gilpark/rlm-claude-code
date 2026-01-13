@@ -27,6 +27,16 @@ from .async_executor import (
 # Core orchestration
 from .auto_activation import AutoActivator, check_auto_activation
 
+# Compute allocation (SPEC-07.10-07.15)
+from .compute_allocation import (
+    AllocationReasoning,
+    ComputeAllocation,
+    ComputeAllocator,
+    DifficultyEstimate,
+    ModelTier,
+    TaskType,
+)
+
 # Complexity and routing
 from .complexity_classifier import should_activate_rlm
 
@@ -168,6 +178,13 @@ __all__ = [
     "IntelligentOrchestrator",
     "AutoActivator",
     "check_auto_activation",
+    # Compute allocation (SPEC-07.10-07.15)
+    "AllocationReasoning",
+    "ComputeAllocation",
+    "ComputeAllocator",
+    "DifficultyEstimate",
+    "ModelTier",
+    "TaskType",
     # Context
     "SessionContext",
     "externalize_context",
