@@ -102,6 +102,17 @@ from .prompt_caching import (
     build_cacheable_prompt,
 )
 
+# Progressive trajectory (SPEC-11.01-11.06)
+from .progressive_trajectory import (
+    CostAttribution,
+    CostBreakdown,
+    ProgressiveTrajectory,
+    render_cost_breakdown,
+    render_detail,
+    render_overview,
+    render_summary,
+)
+
 # Progress reporting (SPEC-01.05 - Phase 4)
 from .progress import (
     CancellationToken,
@@ -255,6 +266,14 @@ __all__ = [
     "CachePrefixRegistry",
     "PromptCacheManager",
     "build_cacheable_prompt",
+    # Progressive trajectory (SPEC-11.01-11.06)
+    "CostAttribution",
+    "CostBreakdown",
+    "ProgressiveTrajectory",
+    "render_cost_breakdown",
+    "render_detail",
+    "render_overview",
+    "render_summary",
     # Progress reporting (SPEC-01.05 - Phase 4)
     "OperationType",
     "ProgressUpdate",
