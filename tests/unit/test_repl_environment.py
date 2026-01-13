@@ -155,6 +155,42 @@ class TestRLMEnvironmentExecute:
         assert result.success is True
         assert result.output == "hello world"
 
+    def test_expression_value_capture_numeric(self, basic_env):
+        """Numeric expressions return their value."""
+        result = basic_env.execute("1 + 1")
+
+        assert result.success is True
+        assert result.output == 2
+
+    def test_expression_value_capture_string(self, basic_env):
+        """String expressions return their value."""
+        result = basic_env.execute('"hello" + " world"')
+
+        assert result.success is True
+        assert result.output == "hello world"
+
+    def test_expression_value_capture_list(self, basic_env):
+        """List expressions return their value."""
+        result = basic_env.execute("[1, 2, 3]")
+
+        assert result.success is True
+        assert result.output == [1, 2, 3]
+
+    def test_expression_value_capture_variable(self, basic_env):
+        """Variable access returns the value."""
+        basic_env.execute("x = 42")
+        result = basic_env.execute("x")
+
+        assert result.success is True
+        assert result.output == 42
+
+    def test_statement_returns_none(self, basic_env):
+        """Statements (non-expressions) return None."""
+        result = basic_env.execute("x = 123")
+
+        assert result.success is True
+        assert result.output is None
+
 
 class TestRLMEnvironmentRestricted:
     """Tests for RestrictedPython sandbox."""
@@ -186,6 +222,34 @@ class TestRLMEnvironmentRestricted:
 
         assert result.success is True
         assert "main.py" in restricted_env.locals["file_list"]
+
+    def test_restricted_expression_value_capture(self, restricted_env):
+        """Expression values are captured in restricted mode."""
+        result = restricted_env.execute("1 + 1")
+
+        assert result.success is True
+        assert result.output == 2
+
+    def test_restricted_expression_string(self, restricted_env):
+        """String expressions return their value in restricted mode."""
+        result = restricted_env.execute('"hello"')
+
+        assert result.success is True
+        assert result.output == "hello"
+
+    def test_restricted_expression_list(self, restricted_env):
+        """List expressions return their value in restricted mode."""
+        result = restricted_env.execute("[1, 2, 3]")
+
+        assert result.success is True
+        assert result.output == [1, 2, 3]
+
+    def test_restricted_print_capture(self, restricted_env):
+        """Print output is captured in restricted mode."""
+        result = restricted_env.execute('print("test")')
+
+        assert result.success is True
+        assert result.output == "test"
 
 
 class TestRLMEnvironmentPeek:

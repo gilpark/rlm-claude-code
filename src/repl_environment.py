@@ -49,6 +49,22 @@ class RLMSecurityError(Exception):
     pass
 
 
+class _REPLPrintCollector:
+    """Print collector for RestrictedPython that captures output to a buffer."""
+
+    def __init__(self, buffer: list[str]):
+        self._buffer = buffer
+
+    def _call_print(self, *args: Any, **kwargs: Any) -> None:
+        """Called by RestrictedPython for print() statements."""
+        output = " ".join(str(arg) for arg in args)
+        self._buffer.append(output)
+
+    def write(self, text: str) -> None:
+        """Write method for compatibility."""
+        self._buffer.append(text)
+
+
 class RLMEnvironment:
     """
     Sandboxed REPL for context manipulation.
@@ -249,6 +265,10 @@ class RLMEnvironment:
 
         Implements: Spec §4.1 Sandbox Architecture
 
+        Uses eval-first approach: tries to evaluate code as an expression first
+        to capture return values (e.g., `1+1` returns `2`). Falls back to exec
+        mode for statements (e.g., `x = 1`).
+
         Args:
             code: Python code to execute
 
@@ -261,26 +281,45 @@ class RLMEnvironment:
         # Set up print capture
         self._print_buffer = output_capture
 
+        # Create print collector for RestrictedPython
+        print_collector = _REPLPrintCollector(output_capture)
+        self.globals["_print"] = print_collector
+        self.globals["_print_"] = lambda _: print_collector
+
         try:
+            result = None
+
             if self.use_restricted:
-                # Use RestrictedPython for compilation
-                # compile_restricted returns a code object directly
-                # Errors are raised as SyntaxError exceptions
-                byte_code = compile_restricted(
-                    code,
-                    filename="<repl>",
-                    mode="exec",
-                )
-
-                # Execute the restricted code
-                exec(byte_code, self.globals, self.locals)
+                # Try eval mode first for expression values
+                try:
+                    byte_code = compile_restricted(
+                        code,
+                        filename="<repl>",
+                        mode="eval",
+                    )
+                    result = eval(byte_code, self.globals, self.locals)
+                except SyntaxError:
+                    # Fall back to exec mode for statements
+                    byte_code = compile_restricted(
+                        code,
+                        filename="<repl>",
+                        mode="exec",
+                    )
+                    exec(byte_code, self.globals, self.locals)
             else:
-                # Fallback: use regular exec (for testing)
-                compiled = compile(code, "<repl>", "exec")
-                exec(compiled, self.globals, self.locals)
+                # Fallback: use regular compile (for testing)
+                try:
+                    compiled = compile(code, "<repl>", "eval")
+                    result = eval(compiled, self.globals, self.locals)
+                except SyntaxError:
+                    # Fall back to exec mode for statements
+                    compiled = compile(code, "<repl>", "exec")
+                    exec(compiled, self.globals, self.locals)
 
-            # Get result - check for _ variable or last expression
-            output = self.locals.get("_")
+            # Use eval result if we got one, otherwise check for _ or print output
+            output = result
+            if output is None:
+                output = self.locals.get("_")
             if output is None and output_capture:
                 output = "\n".join(output_capture)
 
