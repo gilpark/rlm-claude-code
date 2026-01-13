@@ -229,29 +229,31 @@ class MemoryStore:
     VALID_EDGE_TYPES = frozenset({"relation", "composition", "causation", "context"})
 
     # Valid membership roles (SPEC-02.16)
-    VALID_ROLES = frozenset(
-        {"subject", "object", "context", "participant", "cause", "effect"}
-    )
+    VALID_ROLES = frozenset({"subject", "object", "context", "participant", "cause", "effect"})
 
     # Valid edge labels for reasoning/memory integration
     # Decision flow labels (SPEC-04)
-    DECISION_LABELS = frozenset({
-        "spawns",      # goal → decision
-        "considers",   # decision → option
-        "chooses",     # decision → option (selected)
-        "rejects",     # decision → option (rejected)
-        "implements",  # option → action
-        "produces",    # action → outcome
-        "informs",     # observation → any
-    })
+    DECISION_LABELS = frozenset(
+        {
+            "spawns",  # goal → decision
+            "considers",  # decision → option
+            "chooses",  # decision → option (selected)
+            "rejects",  # decision → option (rejected)
+            "implements",  # option → action
+            "produces",  # action → outcome
+            "informs",  # observation → any
+        }
+    )
 
     # Evidence linking labels (for bidirectional fact ↔ decision linking)
-    EVIDENCE_LABELS = frozenset({
-        "supports",     # fact → option (evidence for a choice)
-        "contradicts",  # fact → option (evidence against a choice)
-        "validates",    # outcome → fact (outcome confirms fact)
-        "invalidates",  # outcome → fact (outcome refutes fact)
-    })
+    EVIDENCE_LABELS = frozenset(
+        {
+            "supports",  # fact → option (evidence for a choice)
+            "contradicts",  # fact → option (evidence against a choice)
+            "validates",  # outcome → fact (outcome confirms fact)
+            "invalidates",  # outcome → fact (outcome refutes fact)
+        }
+    )
 
     # All valid edge labels
     VALID_EDGE_LABELS = DECISION_LABELS | EVIDENCE_LABELS
@@ -354,9 +356,7 @@ class MemoryStore:
 
         # Validate tier (SPEC-02.17)
         if tier not in self.VALID_TIERS:
-            raise ValueError(
-                f"Invalid tier: {tier}. Must be one of: {self.VALID_TIERS}"
-            )
+            raise ValueError(f"Invalid tier: {tier}. Must be one of: {self.VALID_TIERS}")
 
         # Validate confidence (SPEC-02.10)
         if not 0.0 <= confidence <= 1.0:
@@ -467,9 +467,7 @@ class MemoryStore:
         conn = self._get_connection()
         try:
             # Check if node exists and get current tier for logging
-            cursor = conn.execute(
-                "SELECT tier FROM nodes WHERE id = ?", (node_id,)
-            )
+            cursor = conn.execute("SELECT tier FROM nodes WHERE id = ?", (node_id,))
             row = cursor.fetchone()
             if row is None:
                 return False
@@ -669,9 +667,7 @@ class MemoryStore:
         """Get a hyperedge by ID."""
         conn = self._get_connection()
         try:
-            cursor = conn.execute(
-                "SELECT * FROM hyperedges WHERE id = ?", (edge_id,)
-            )
+            cursor = conn.execute("SELECT * FROM hyperedges WHERE id = ?", (edge_id,))
             row = cursor.fetchone()
             if row is None:
                 return None
@@ -939,9 +935,7 @@ class MemoryStore:
         """
         return self._get_evidence_for_target(fact_id, "invalidates")
 
-    def _get_evidence_for_target(
-        self, target_id: str, label: str
-    ) -> list[tuple[str, float]]:
+    def _get_evidence_for_target(self, target_id: str, label: str) -> list[tuple[str, float]]:
         """
         Get evidence nodes pointing to a target with a specific label.
 
@@ -971,9 +965,7 @@ class MemoryStore:
         finally:
             conn.close()
 
-    def get_evidence_targets(
-        self, source_id: str, label: str
-    ) -> list[tuple[str, float]]:
+    def get_evidence_targets(self, source_id: str, label: str) -> list[tuple[str, float]]:
         """
         Get nodes that a source provides evidence for.
 
@@ -1129,8 +1121,7 @@ class MemoryStore:
         """
         if trigger_type not in VALID_CONFIDENCE_TRIGGERS:
             raise ValueError(
-                f"Invalid trigger type: {trigger_type}. "
-                f"Must be one of: {VALID_CONFIDENCE_TRIGGERS}"
+                f"Invalid trigger type: {trigger_type}. Must be one of: {VALID_CONFIDENCE_TRIGGERS}"
             )
 
         conn = self._get_connection()
@@ -1517,9 +1508,7 @@ class MemoryStore:
             doc_count = cursor.fetchone()["count"]
 
             # Get index size (approximate)
-            cursor = conn.execute(
-                "SELECT SUM(length(content)) as total_chars FROM content_fts"
-            )
+            cursor = conn.execute("SELECT SUM(length(content)) as total_chars FROM content_fts")
             row = cursor.fetchone()
             total_chars = row["total_chars"] if row["total_chars"] else 0
 
@@ -1558,4 +1547,11 @@ class MemoryStore:
         )
 
 
-__all__ = ["MemoryStore", "Node", "Hyperedge", "EvolutionLogEntry", "SearchResult", "ConfidenceUpdate"]
+__all__ = [
+    "MemoryStore",
+    "Node",
+    "Hyperedge",
+    "EvolutionLogEntry",
+    "SearchResult",
+    "ConfidenceUpdate",
+]

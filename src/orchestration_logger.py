@@ -203,7 +203,6 @@ class OrchestrationLogger:
                 query_length=len(query),
                 context_tokens=context_tokens,
                 context_summary=context_summary[:500],  # Truncate
-
                 # Output labels
                 activate_rlm=decision.get("activate_rlm", False),
                 activation_reason=decision.get("activation_reason", ""),
@@ -215,7 +214,6 @@ class OrchestrationLogger:
                 complexity_score=decision.get("complexity_score", 0.5),
                 confidence=confidence,
                 signals=decision.get("signals", []),
-
                 # Metadata
                 timestamp=datetime.now().isoformat(),
                 source=source,
@@ -338,10 +336,20 @@ class TrainingDataExporter:
 
         # Define columns
         columns = [
-            "query", "query_length", "context_tokens",
-            "activate_rlm", "activation_reason", "execution_mode",
-            "model_tier", "depth_budget", "tool_access", "query_type",
-            "complexity_score", "confidence", "source", "latency_ms",
+            "query",
+            "query_length",
+            "context_tokens",
+            "activate_rlm",
+            "activation_reason",
+            "execution_mode",
+            "model_tier",
+            "depth_budget",
+            "tool_access",
+            "query_type",
+            "complexity_score",
+            "confidence",
+            "source",
+            "latency_ms",
         ]
 
         with open(output, "w") as f:

@@ -191,8 +191,8 @@ class ProgressContext:
         elapsed = (time.perf_counter() - self._start_time) * 1000
         self._stats.total_time_ms = elapsed
         if self._stats.total_time_ms > 0:
-            self._stats.operations_per_second = (
-                self._stats.completed_operations / (self._stats.total_time_ms / 1000)
+            self._stats.operations_per_second = self._stats.completed_operations / (
+                self._stats.total_time_ms / 1000
             )
 
         if exc_val is not None:

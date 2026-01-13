@@ -128,9 +128,7 @@ def extract_complexity_signals(prompt: str, context: SessionContext) -> TaskComp
         context_has_multiple_domains=len(context.active_modules) > 2,
         recent_tool_outputs_large=sum(len(o.content) for o in context.tool_outputs[-5:]) > 10000,
         conversation_has_state_changes=_detect_state_changes(context),
-        files_span_multiple_modules=len(
-            {Path(f).parts[0] for f in context.files if Path(f).parts}
-        )
+        files_span_multiple_modules=len({Path(f).parts[0] for f in context.files if Path(f).parts})
         > 2,
         previous_turn_was_confused=_detect_confusion(context),
         task_is_continuation="continue" in prompt_lower

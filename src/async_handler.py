@@ -122,9 +122,7 @@ class AsyncQueryHandler:
         tasks: list[asyncio.Task[str]] = []
         for query, context in queries:
             task = asyncio.create_task(
-                self._execute_with_semaphore(
-                    query, context, spawn_repl, max_tokens
-                )
+                self._execute_with_semaphore(query, context, spawn_repl, max_tokens)
             )
             self._active_tasks.add(task)
             tasks.append(task)

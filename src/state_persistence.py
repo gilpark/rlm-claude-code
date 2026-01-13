@@ -342,11 +342,7 @@ class StatePersistence:
 
     def list_sessions(self) -> list[str]:
         """List all saved session IDs."""
-        return [
-            f.stem
-            for f in self.state_dir.glob("*.json")
-            if not f.stem.endswith("_context")
-        ]
+        return [f.stem for f in self.state_dir.glob("*.json") if not f.stem.endswith("_context")]
 
     def cleanup_old_sessions(self, max_age_days: int = 7) -> int:
         """

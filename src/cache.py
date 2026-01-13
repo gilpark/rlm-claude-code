@@ -316,9 +316,7 @@ class ContextCache:
         key = f"{tool_name}:{input_hash}"
         return self._tool_outputs.get(key)
 
-    def put_tool_output(
-        self, tool_name: str, input_hash: str, output: dict[str, Any]
-    ) -> None:
+    def put_tool_output(self, tool_name: str, input_hash: str, output: dict[str, Any]) -> None:
         """Cache tool output."""
         key = f"{tool_name}:{input_hash}"
         self._tool_outputs.put(key, output)

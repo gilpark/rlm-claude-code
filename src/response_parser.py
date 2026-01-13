@@ -127,9 +127,7 @@ class ResponseParser:
 
     def has_final_answer(self, response: str) -> bool:
         """Check if response contains a final answer."""
-        return bool(
-            self.FINAL_ANSWER.search(response) or self.FINAL_VAR.search(response)
-        )
+        return bool(self.FINAL_ANSWER.search(response) or self.FINAL_VAR.search(response))
 
     def extract_final_answer(self, response: str) -> str | None:
         """

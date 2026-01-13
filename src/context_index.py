@@ -28,13 +28,9 @@ if TYPE_CHECKING:
 # Match: import os, sys OR from pathlib import Path
 PYTHON_PLAIN_IMPORT = re.compile(r"^\s*import\s+([\w.]+)", re.MULTILINE)
 PYTHON_FROM_IMPORT = re.compile(r"^\s*from\s+([\w.]+)\s+import\s+", re.MULTILINE)
-PYTHON_EXPORT_PATTERN = re.compile(
-    r"^(?:def|class|async\s+def)\s+(\w+)", re.MULTILINE
-)
+PYTHON_EXPORT_PATTERN = re.compile(r"^(?:def|class|async\s+def)\s+(\w+)", re.MULTILINE)
 
-JS_TS_IMPORT_PATTERN = re.compile(
-    r"^\s*import\s+.*?from\s+['\"]([^'\"]+)['\"]", re.MULTILINE
-)
+JS_TS_IMPORT_PATTERN = re.compile(r"^\s*import\s+.*?from\s+['\"]([^'\"]+)['\"]", re.MULTILINE)
 JS_TS_EXPORT_PATTERN = re.compile(
     r"^\s*export\s+(?:default\s+)?(?:function|class|const|let|var|async\s+function)\s+(\w+)",
     re.MULTILINE,

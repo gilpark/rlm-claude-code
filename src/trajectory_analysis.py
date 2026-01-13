@@ -163,8 +163,12 @@ class TrajectoryAnalyzer:
         self._compiled_patterns: dict[StrategyType, list[re.Pattern[str]]] = {
             StrategyType.PEEKING: [re.compile(p, re.IGNORECASE) for p in self.PEEKING_PATTERNS],
             StrategyType.GREPPING: [re.compile(p, re.IGNORECASE) for p in self.GREPPING_PATTERNS],
-            StrategyType.PARTITION_MAP: [re.compile(p, re.IGNORECASE) for p in self.PARTITION_MAP_PATTERNS],
-            StrategyType.PROGRAMMATIC: [re.compile(p, re.IGNORECASE) for p in self.PROGRAMMATIC_PATTERNS],
+            StrategyType.PARTITION_MAP: [
+                re.compile(p, re.IGNORECASE) for p in self.PARTITION_MAP_PATTERNS
+            ],
+            StrategyType.PROGRAMMATIC: [
+                re.compile(p, re.IGNORECASE) for p in self.PROGRAMMATIC_PATTERNS
+            ],
         }
 
     def analyze(self, events: list[TrajectoryEvent]) -> StrategyAnalysis:

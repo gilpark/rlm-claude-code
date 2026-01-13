@@ -167,9 +167,7 @@ class MemoryEvolution:
         )
 
         if not task_nodes:
-            return ConsolidationResult(
-                merged_count=0, promoted_count=0, edges_strengthened=0
-            )
+            return ConsolidationResult(merged_count=0, promoted_count=0, edges_strengthened=0)
 
         merged_count = 0
         promoted_count = 0

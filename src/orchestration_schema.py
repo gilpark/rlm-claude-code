@@ -155,6 +155,7 @@ class OrchestrationPlan:
     signals: list[str] = field(default_factory=list)
     estimated_cost: float = 0.0
     estimated_latency_ms: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)  # For telemetry tracking
 
     @property
     def total_token_budget(self) -> int:
@@ -199,6 +200,7 @@ class OrchestrationPlan:
             "complexity_score": self.complexity_score,
             "confidence": self.confidence,
             "signals": self.signals,
+            "metadata": self.metadata,
         }
 
     @classmethod

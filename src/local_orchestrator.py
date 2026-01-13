@@ -243,7 +243,11 @@ class MLXRunner(LocalModelRunner):
 
         # Format prompt with chat template
         tokenizer = self._tokenizer
-        if tokenizer is not None and hasattr(tokenizer, "chat_template") and tokenizer.chat_template is not None:
+        if (
+            tokenizer is not None
+            and hasattr(tokenizer, "chat_template")
+            and tokenizer.chat_template is not None
+        ):
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -1138,9 +1142,7 @@ Output your decision as a JSON object."""
             "cache_hit_rate": self._stats["cache_hits"] / total if total > 0 else 0.0,
             # Performance
             "avg_latency_ms": (
-                self._stats["total_latency_ms"] / decisions_made
-                if decisions_made > 0
-                else 0.0
+                self._stats["total_latency_ms"] / decisions_made if decisions_made > 0 else 0.0
             ),
             # Cascade efficiency (% resolved by fast levels 1-2)
             "fast_cascade_rate": (

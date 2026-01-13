@@ -248,9 +248,7 @@ class OpenAIClient(BaseLLMClient):
     ):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "OpenAI API key required. Set OPENAI_API_KEY environment variable."
-            )
+            raise ValueError("OpenAI API key required. Set OPENAI_API_KEY environment variable.")
         self.client = openai.OpenAI(api_key=self.api_key)
         self.cost_tracker = cost_tracker or get_cost_tracker()
 
@@ -511,9 +509,7 @@ class MultiProviderClient:
 
         model = model or "haiku"
 
-        messages = [
-            {"role": "user", "content": build_summarization_prompt(content, max_tokens)}
-        ]
+        messages = [{"role": "user", "content": build_summarization_prompt(content, max_tokens)}]
 
         response = await self.complete(
             messages=messages,

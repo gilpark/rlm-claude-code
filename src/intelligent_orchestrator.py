@@ -222,6 +222,7 @@ class IntelligentOrchestrator:
         client: ClaudeClient | None = None,
         config: OrchestratorConfig | None = None,
         available_models: list[str] | None = None,
+        telemetry: Any | None = None,
     ):
         """
         Initialize the intelligent orchestrator.
@@ -230,6 +231,7 @@ class IntelligentOrchestrator:
             client: Claude API client (creates one if None)
             config: Orchestrator configuration
             available_models: List of available model names
+            telemetry: Optional OrchestrationTelemetry for heuristic tracking
         """
         self._client = client
         self.config = config or OrchestratorConfig()
@@ -238,6 +240,7 @@ class IntelligentOrchestrator:
         self._decision_cache: dict[str, OrchestrationPlan] = {}
         self._local_orchestrator: Any = None  # Lazy initialized
         self._decision_logger: Any = None  # Lazy initialized
+        self._telemetry = telemetry  # OrchestrationTelemetry for per-heuristic tracking
         self._stats = {
             "llm_decisions": 0,
             "local_decisions": 0,
@@ -269,6 +272,7 @@ class IntelligentOrchestrator:
                 local_config = RECOMMENDED_CONFIGS[preset]
             else:
                 from .local_orchestrator import LocalModelConfig
+
                 local_config = LocalModelConfig()
 
             self._local_orchestrator = LocalOrchestrator(
@@ -355,7 +359,16 @@ class IntelligentOrchestrator:
                     if self.config.use_fallback:
                         self._stats["fallback_decisions"] += 1
                         plan = self._heuristic_orchestrate(query, orch_context)
-                        self._log_decision(query, context_summary, plan, "heuristic", 0, orch_context)
+                        self._log_decision(
+                            query,
+                            context_summary,
+                            plan,
+                            "heuristic",
+                            0,
+                            orch_context,
+                            heuristics_triggered=plan.metadata.get("heuristics_triggered"),
+                            heuristics_checked=plan.metadata.get("heuristics_checked"),
+                        )
                         return plan
                     raise RuntimeError(f"Local orchestration failed: {e}") from e
 
@@ -382,7 +395,16 @@ class IntelligentOrchestrator:
             if self.config.use_fallback:
                 self._stats["fallback_decisions"] += 1
                 plan = self._heuristic_orchestrate(query, orch_context)
-                self._log_decision(query, context_summary, plan, "heuristic", 0, orch_context)
+                self._log_decision(
+                    query,
+                    context_summary,
+                    plan,
+                    "heuristic",
+                    0,
+                    orch_context,
+                    heuristics_triggered=plan.metadata.get("heuristics_triggered"),
+                    heuristics_checked=plan.metadata.get("heuristics_checked"),
+                )
                 return plan
             else:
                 raise RuntimeError(f"Orchestration failed: {e}") from e
@@ -395,22 +417,46 @@ class IntelligentOrchestrator:
         source: str,
         latency_ms: float,
         context: OrchestrationContext,
-    ) -> None:
-        """Log an orchestration decision for training data."""
-        logger = self._ensure_logger()
-        if logger is None:
-            return
+        heuristics_triggered: list[str] | None = None,
+        heuristics_checked: list[str] | None = None,
+    ) -> str | None:
+        """
+        Log an orchestration decision for training data.
 
-        decision = plan.to_dict()
-        logger.log_decision(
-            query=query,
-            context_summary=context_summary,
-            decision=decision,
-            source=source,
-            latency_ms=latency_ms,
-            context_tokens=context.context_tokens,
-            model_used=self.config.orchestrator_model if source == "api" else "",
-        )
+        Returns:
+            query_id if telemetry is enabled, None otherwise
+        """
+        query_id = None
+
+        # Log to OrchestrationLogger
+        logger = self._ensure_logger()
+        if logger is not None:
+            decision = plan.to_dict()
+            logger.log_decision(
+                query=query,
+                context_summary=context_summary,
+                decision=decision,
+                source=source,
+                latency_ms=latency_ms,
+                context_tokens=context.context_tokens,
+                model_used=self.config.orchestrator_model if source == "api" else "",
+            )
+
+        # Log to OrchestrationTelemetry (for heuristic tracking)
+        if self._telemetry is not None and source == "heuristic":
+            decision = plan.to_dict()
+            query_id = self._telemetry.log_decision_with_heuristics(
+                query=query,
+                decision=decision,
+                heuristics_triggered=heuristics_triggered or [],
+                heuristics_checked=heuristics_checked or [],
+                source=source,
+                latency_ms=latency_ms,
+            )
+            # Store query_id in plan metadata for later outcome tracking
+            plan.metadata["query_id"] = query_id
+
+        return query_id
 
     async def _llm_orchestrate(
         self,
@@ -614,13 +660,20 @@ Output your decision as a JSON object."""
         requiring an LLM call. It's designed to be conservative (bias toward RLM
         activation when uncertain) while avoiding unnecessary overhead for
         clearly simple tasks.
+
+        Tracks which heuristics were checked and triggered for telemetry.
         """
         query_lower = query.lower()
+
+        # Track heuristics for telemetry (Feature 3e0.6)
+        heuristics_checked: list[str] = []
+        heuristics_triggered: list[str] = []
 
         # === High-Value RLM Signals (activate if any are present) ===
         high_value_signals: list[str] = []
 
         # 1. Discovery Required
+        heuristics_checked.append("discovery_required")
         discovery_patterns = [
             r"\bwhy\s+(is|does|did|are|was|were)\b",
             r"\bhow\s+does\b.*\bwork\b",
@@ -631,8 +684,10 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in discovery_patterns):
             high_value_signals.append("discovery_required")
+            heuristics_triggered.append("discovery_required")
 
         # 2. Multi-Source Synthesis
+        heuristics_checked.append("synthesis_required")
         synthesis_patterns = [
             r"\ball\s+(usages?|instances?|occurrences?|references?)\b",
             r"\bupdate\s+(all|every)\b",
@@ -642,8 +697,10 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in synthesis_patterns):
             high_value_signals.append("synthesis_required")
+            heuristics_triggered.append("synthesis_required")
 
         # 3. Uncertainty / Multiple Interpretations
+        heuristics_checked.append("uncertainty_high")
         uncertainty_patterns = [
             r"\b(best|better|optimal|right)\s+(way|approach|method)\b",
             r"\bshould\s+(i|we)\b",
@@ -654,8 +711,10 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in uncertainty_patterns):
             high_value_signals.append("uncertainty_high")
+            heuristics_triggered.append("uncertainty_high")
 
         # 4. Deep Debugging
+        heuristics_checked.append("debugging_deep")
         deep_debug_patterns = [
             r"\bintermittent\b",
             r"\bflaky\b",
@@ -668,8 +727,10 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in deep_debug_patterns):
             high_value_signals.append("debugging_deep")
+            heuristics_triggered.append("debugging_deep")
 
         # 5. Architectural Reasoning
+        heuristics_checked.append("architectural")
         architecture_patterns = [
             r"\b(design|architect)\b.*\b(system|api|service)\b",
             r"\bmicroservices?\b",
@@ -680,8 +741,10 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in architecture_patterns):
             high_value_signals.append("architectural")
+            heuristics_triggered.append("architectural")
 
         # 6. Pattern Exhaustion / Completeness
+        heuristics_checked.append("pattern_exhaustion")
         exhaustion_patterns = [
             r"\bfind\s+all\b",
             r"\b(every|all)\s+(edge\s+)?cases?\b",
@@ -692,15 +755,19 @@ Output your decision as a JSON object."""
         ]
         if any(re.search(p, query_lower) for p in exhaustion_patterns):
             high_value_signals.append("pattern_exhaustion")
+            heuristics_triggered.append("pattern_exhaustion")
 
         # 7. Context Recovery (from context signals)
+        heuristics_checked.append("user_frustrated")
         if context.complexity_signals.get("previous_turn_was_confused"):
             high_value_signals.append("user_frustrated")
+            heuristics_triggered.append("user_frustrated")
 
         # === Low-Value Signals (skip RLM if ONLY these are present) ===
         low_value_signals: list[str] = []
 
         # Direct Knowledge
+        heuristics_checked.append("knowledge_retrieval")
         knowledge_patterns = [
             r"^(show|cat|read|view|open)\s+[\w./]+$",
             r"^what('s| is)\s+the\s+syntax\b",
@@ -708,34 +775,49 @@ Output your decision as a JSON object."""
         ]
         if any(re.match(p, query_lower) for p in knowledge_patterns):
             low_value_signals.append("knowledge_retrieval")
+            heuristics_triggered.append("knowledge_retrieval")
 
         # Narrow Scope
+        heuristics_checked.append("narrow_scope")
         narrow_patterns = [
             r"^(add|fix|change|update)\s+(a|the|this)\s+(typo|comment|annotation|import)\b",
             r"^rename\s+\w+\s+to\s+\w+$",
         ]
         if any(re.match(p, query_lower) for p in narrow_patterns):
             low_value_signals.append("narrow_scope")
+            heuristics_triggered.append("narrow_scope")
 
         # Conversational
+        heuristics_checked.append("conversational")
         conversational_patterns = [
             r"^(ok(ay)?|yes|no|sure|thanks?|got\s+it|understood)\.?$",
             r"^(do\s+(it|that)|go\s+ahead|proceed|continue)\.?$",
         ]
         if any(re.match(p, query_lower.strip()) for p in conversational_patterns):
             low_value_signals.append("conversational")
-            return OrchestrationPlan.bypass("conversational")
+            heuristics_triggered.append("conversational")
+            plan = OrchestrationPlan.bypass("conversational")
+            # Store heuristics for telemetry
+            plan.metadata["heuristics_checked"] = heuristics_checked
+            plan.metadata["heuristics_triggered"] = heuristics_triggered
+            return plan
 
         # === User Intent Signals ===
         user_signals: list[str] = []
 
         # Urgency
+        heuristics_checked.append("user_urgent")
         if re.search(r"\b(quick(ly)?|just|fast|simple)\b", query_lower):
             user_signals.append("user_urgent")
+            heuristics_triggered.append("user_urgent")
 
         # Carefulness
-        if re.search(r"\b(make\s+sure|careful(ly)?|thorough(ly)?|verify|double.?check)\b", query_lower):
+        heuristics_checked.append("user_careful")
+        if re.search(
+            r"\b(make\s+sure|careful(ly)?|thorough(ly)?|verify|double.?check)\b", query_lower
+        ):
             user_signals.append("user_careful")
+            heuristics_triggered.append("user_careful")
 
         # === Decision Logic ===
         all_signals = high_value_signals + low_value_signals + user_signals
@@ -744,7 +826,10 @@ Output your decision as a JSON object."""
         if low_value_signals and not high_value_signals:
             # Unless it's a large context
             if context.context_tokens < 50_000:
-                return OrchestrationPlan.bypass(f"low_value:{low_value_signals[0]}")
+                plan = OrchestrationPlan.bypass(f"low_value:{low_value_signals[0]}")
+                plan.metadata["heuristics_checked"] = heuristics_checked
+                plan.metadata["heuristics_triggered"] = heuristics_triggered
+                return plan
 
         # Get query classification for type
         classification = self._query_classifier.classify(query)
@@ -766,7 +851,10 @@ Output your decision as a JSON object."""
             all_signals.append(traditional_reason)
 
         if not should_activate:
-            return OrchestrationPlan.bypass("simple_task")
+            plan = OrchestrationPlan.bypass("simple_task")
+            plan.metadata["heuristics_checked"] = heuristics_checked
+            plan.metadata["heuristics_triggered"] = heuristics_triggered
+            return plan
 
         # Determine execution mode
         if "user_careful" in user_signals or "pattern_exhaustion" in high_value_signals:
@@ -783,7 +871,11 @@ Output your decision as a JSON object."""
         # Determine depth budget based on signals
         if "debugging_deep" in high_value_signals or "architectural" in high_value_signals:
             depth_budget = 3
-        elif "synthesis_required" in high_value_signals or "pattern_exhaustion" in high_value_signals or "discovery_required" in high_value_signals:
+        elif (
+            "synthesis_required" in high_value_signals
+            or "pattern_exhaustion" in high_value_signals
+            or "discovery_required" in high_value_signals
+        ):
             depth_budget = 2
         else:
             depth_budget = 1
@@ -809,6 +901,10 @@ Output your decision as a JSON object."""
         plan.complexity_score = classification.complexity
         plan.signals = all_signals
         plan.confidence = classification.confidence
+
+        # Store heuristics for telemetry
+        plan.metadata["heuristics_checked"] = heuristics_checked
+        plan.metadata["heuristics_triggered"] = heuristics_triggered
 
         return plan
 
@@ -843,7 +939,9 @@ Output your decision as a JSON object."""
             "llm_rate": self._stats["llm_decisions"] / total if total > 0 else 0.0,
             "local_rate": self._stats["local_decisions"] / total if total > 0 else 0.0,
             "cache_hit_rate": self._stats["cache_hits"] / total if total > 0 else 0.0,
-            "error_rate": self._stats["errors"] / (total + self._stats["errors"]) if total > 0 else 0.0,
+            "error_rate": self._stats["errors"] / (total + self._stats["errors"])
+            if total > 0
+            else 0.0,
         }
 
 

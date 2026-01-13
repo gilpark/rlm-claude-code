@@ -299,7 +299,7 @@ class TrajectoryVisualizer:
             <div class="event-header">
                 <span class="time">{entry.formatted_time}</span>
                 <span class="label">{html.escape(entry.label)}</span>
-                {f'<span class="duration">({entry.duration_ms:.1f}ms)</span>' if entry.duration_ms else ''}
+                {f'<span class="duration">({entry.duration_ms:.1f}ms)</span>' if entry.duration_ms else ""}
             </div>
             <div class="event-content">{html.escape(entry.content)}</div>
         </div>""")
@@ -445,7 +445,7 @@ class TrajectoryVisualizer:
     </div>
 
     <div class="timeline">
-        {''.join(events_html)}
+        {"".join(events_html)}
     </div>
 
     <script>

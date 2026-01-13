@@ -30,15 +30,17 @@ if TYPE_CHECKING:
 ALLOWED_SUBPROCESSES = frozenset({"ty", "ruff"})
 
 # Blocked builtins that could be dangerous
-BLOCKED_BUILTINS = frozenset({
-    "open",
-    "exec",
-    "eval",
-    "compile",
-    "__import__",
-    "input",
-    "breakpoint",
-})
+BLOCKED_BUILTINS = frozenset(
+    {
+        "open",
+        "exec",
+        "eval",
+        "compile",
+        "__import__",
+        "input",
+        "breakpoint",
+    }
+)
 
 
 class RLMSecurityError(Exception):
@@ -285,12 +287,14 @@ class RLMEnvironment:
             execution_time = (time.time() - start_time) * 1000
 
             # Record in history
-            self.history.append({
-                "code": code,
-                "success": True,
-                "output": output,
-                "time_ms": execution_time,
-            })
+            self.history.append(
+                {
+                    "code": code,
+                    "success": True,
+                    "output": output,
+                    "time_ms": execution_time,
+                }
+            )
 
             return ExecutionResult(
                 success=True,
@@ -302,12 +306,14 @@ class RLMEnvironment:
             execution_time = (time.time() - start_time) * 1000
 
             # Record in history
-            self.history.append({
-                "code": code,
-                "success": False,
-                "error": str(e),
-                "time_ms": execution_time,
-            })
+            self.history.append(
+                {
+                    "code": code,
+                    "success": False,
+                    "error": str(e),
+                    "time_ms": execution_time,
+                }
+            )
 
             return ExecutionResult(
                 success=False,
@@ -346,9 +352,7 @@ class RLMEnvironment:
         else:
             return str(var)[start:end]
 
-    def _search(
-        self, var: Any, pattern: str, regex: bool = False
-    ) -> list[dict[str, Any]]:
+    def _search(self, var: Any, pattern: str, regex: bool = False) -> list[dict[str, Any]]:
         """
         Search for patterns in context variable.
 
@@ -702,9 +706,7 @@ class RLMEnvironment:
         # Validate language (SPEC-01.14)
         valid_languages = {"python", "go", "javascript", "typescript"}
         if language not in valid_languages:
-            raise ValueError(
-                f"Invalid language: {language}. Must be one of: {valid_languages}"
-            )
+            raise ValueError(f"Invalid language: {language}. Must be one of: {valid_languages}")
 
         # Handle empty/malformed input gracefully (SPEC-01.17)
         if not content:
@@ -732,16 +734,16 @@ class RLMEnvironment:
                     start_line = content[:start_pos].count("\n") + 1
 
                     # Estimate end line (simple heuristic)
-                    end_line = self._estimate_function_end(
-                        lines, start_line - 1, language
-                    )
+                    end_line = self._estimate_function_end(lines, start_line - 1, language)
 
-                    functions.append({
-                        "name": name,
-                        "signature": signature,
-                        "start_line": start_line,
-                        "end_line": end_line,
-                    })
+                    functions.append(
+                        {
+                            "name": name,
+                            "signature": signature,
+                            "start_line": start_line,
+                            "end_line": end_line,
+                        }
+                    )
                 except (IndexError, AttributeError):
                     # Handle malformed input gracefully (SPEC-01.17)
                     continue
@@ -825,9 +827,7 @@ class RLMEnvironment:
         }
         return patterns.get(language, [])
 
-    def _estimate_function_end(
-        self, lines: list[str], start_idx: int, language: str
-    ) -> int:
+    def _estimate_function_end(self, lines: list[str], start_idx: int, language: str) -> int:
         """
         Estimate the end line of a function.
 
@@ -1057,9 +1057,7 @@ class RLMEnvironment:
             confidence=confidence,
         )
 
-    def _memory_add_experience(
-        self, content: str, outcome: str, success: bool
-    ) -> str:
+    def _memory_add_experience(self, content: str, outcome: str, success: bool) -> str:
         """
         Add an experience to memory.
 

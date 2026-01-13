@@ -228,11 +228,13 @@ class RLMOrchestrator:
             if not parsed_items:
                 # No actionable content, might be stuck
                 state.messages.append({"role": "assistant", "content": response.content})
-                state.messages.append({
-                    "role": "user",
-                    "content": "Please continue. Use ```python blocks for REPL code, "
-                    "or output FINAL: <answer> when you have the answer.",
-                })
+                state.messages.append(
+                    {
+                        "role": "user",
+                        "content": "Please continue. Use ```python blocks for REPL code, "
+                        "or output FINAL: <answer> when you have the answer.",
+                    }
+                )
                 continue
 
             # Process each parsed item
@@ -249,11 +251,13 @@ class RLMOrchestrator:
                         state.final_answer = str(var_value)
                     except KeyError:
                         state.messages.append({"role": "assistant", "content": response.content})
-                        state.messages.append({
-                            "role": "user",
-                            "content": f"Variable '{var_name}' not found. Available variables: "
-                            f"{list(repl.globals.get('working_memory', {}).keys())}",
-                        })
+                        state.messages.append(
+                            {
+                                "role": "user",
+                                "content": f"Variable '{var_name}' not found. Available variables: "
+                                f"{list(repl.globals.get('working_memory', {}).keys())}",
+                            }
+                        )
                     break
 
                 elif item.action == ResponseAction.REPL_EXECUTE:
@@ -271,7 +275,9 @@ class RLMOrchestrator:
 
                     # Execute code synchronously - async ops become DeferredOperations
                     exec_result = repl.execute(code)
-                    repl_result = exec_result.output if exec_result.success else f"Error: {exec_result.error}"
+                    repl_result = (
+                        exec_result.output if exec_result.success else f"Error: {exec_result.error}"
+                    )
 
                     # Process any deferred async operations
                     if repl.has_pending_operations():
@@ -286,13 +292,19 @@ class RLMOrchestrator:
                         ops, batches = repl.get_pending_operations()
                         for op in ops:
                             if op.resolved:
-                                deferred_results.append(f"{op.operation_id}: {str(op.result)[:200]}")
+                                deferred_results.append(
+                                    f"{op.operation_id}: {str(op.result)[:200]}"
+                                )
                         for batch in batches:
                             if batch.resolved:
-                                deferred_results.append(f"{batch.batch_id}: {len(batch.results)} results")
+                                deferred_results.append(
+                                    f"{batch.batch_id}: {len(batch.results)} results"
+                                )
 
                         if deferred_results:
-                            repl_result = f"{repl_result}\n\nAsync results:\n" + "\n".join(deferred_results)
+                            repl_result = f"{repl_result}\n\nAsync results:\n" + "\n".join(
+                                deferred_results
+                            )
 
                         repl.clear_pending_operations()
 
@@ -307,18 +319,22 @@ class RLMOrchestrator:
 
                     # Add to conversation
                     state.messages.append({"role": "assistant", "content": response.content})
-                    state.messages.append({
-                        "role": "user",
-                        "content": f"REPL output:\n```\n{repl_result}\n```\n\nContinue your analysis or provide FINAL: <answer>",
-                    })
+                    state.messages.append(
+                        {
+                            "role": "user",
+                            "content": f"REPL output:\n```\n{repl_result}\n```\n\nContinue your analysis or provide FINAL: <answer>",
+                        }
+                    )
 
                 elif item.action == ResponseAction.THINKING:
                     # Just thinking, add to messages and continue
                     state.messages.append({"role": "assistant", "content": response.content})
-                    state.messages.append({
-                        "role": "user",
-                        "content": "Please continue with REPL actions or provide your final answer.",
-                    })
+                    state.messages.append(
+                        {
+                            "role": "user",
+                            "content": "Please continue with REPL actions or provide your final answer.",
+                        }
+                    )
 
             # Break if we have answer
             if state.final_answer:
@@ -451,8 +467,7 @@ class RLMOrchestrator:
         # Resolve batches
         for batch in batches:
             batch_results = [
-                result_map.get(op.operation_id, "[Missing result]")
-                for op in batch.operations
+                result_map.get(op.operation_id, "[Missing result]") for op in batch.operations
             ]
             repl.resolve_batch(batch.batch_id, batch_results)
 

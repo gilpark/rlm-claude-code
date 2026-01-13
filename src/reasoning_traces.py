@@ -114,14 +114,16 @@ CREATE INDEX IF NOT EXISTS idx_decisions_commit ON decisions(commit_hash);
 # Valid Types
 # =============================================================================
 
-VALID_DECISION_TYPES = frozenset({
-    "goal",
-    "decision",
-    "option",
-    "action",
-    "outcome",
-    "observation",
-})
+VALID_DECISION_TYPES = frozenset(
+    {
+        "goal",
+        "decision",
+        "option",
+        "action",
+        "outcome",
+        "observation",
+    }
+)
 
 
 # =============================================================================
@@ -533,9 +535,7 @@ class ReasoningTraces:
             weight=weight,
         )
 
-    def get_evidence_for_option(
-        self, option_id: str
-    ) -> dict[str, list[tuple[str, float]]]:
+    def get_evidence_for_option(self, option_id: str) -> dict[str, list[tuple[str, float]]]:
         """
         Get all evidence (supporting and contradicting facts) for an option.
 
@@ -550,9 +550,7 @@ class ReasoningTraces:
             "contradicting": self.store.get_contradicting_facts(option_id),
         }
 
-    def get_outcome_evidence_for_fact(
-        self, fact_id: str
-    ) -> dict[str, list[tuple[str, float]]]:
+    def get_outcome_evidence_for_fact(self, fact_id: str) -> dict[str, list[tuple[str, float]]]:
         """
         Get all outcome evidence (validating and invalidating) for a fact.
 
@@ -567,9 +565,7 @@ class ReasoningTraces:
             "invalidating": self.store.get_invalidating_outcomes(fact_id),
         }
 
-    def _compute_recency_weight(
-        self, timestamp_ms: int, half_life_days: float = 7.0
-    ) -> float:
+    def _compute_recency_weight(self, timestamp_ms: int, half_life_days: float = 7.0) -> float:
         """
         Compute recency weight using exponential decay.
 
@@ -622,9 +618,7 @@ class ReasoningTraces:
         for fact_id, edge_weight in supporting:
             node = self.store.get_node(fact_id)
             if node:
-                recency = self._compute_recency_weight(
-                    node.created_at, recency_half_life_days
-                )
+                recency = self._compute_recency_weight(node.created_at, recency_half_life_days)
                 weighted = edge_weight * node.confidence * recency
                 support_score += weighted
                 supporting_details.append((fact_id, edge_weight, node.confidence))
@@ -635,9 +629,7 @@ class ReasoningTraces:
         for fact_id, edge_weight in contradicting:
             node = self.store.get_node(fact_id)
             if node:
-                recency = self._compute_recency_weight(
-                    node.created_at, recency_half_life_days
-                )
+                recency = self._compute_recency_weight(node.created_at, recency_half_life_days)
                 weighted = edge_weight * node.confidence * recency
                 contradiction_score += weighted
                 contradicting_details.append((fact_id, edge_weight, node.confidence))
@@ -667,27 +659,31 @@ class ReasoningTraces:
         for fact_id, weight in self.store.get_supporting_facts(option_id):
             node = self.store.get_node(fact_id)
             if node:
-                evidence_chain.append({
-                    "fact_id": fact_id,
-                    "content": node.content,
-                    "confidence": node.confidence,
-                    "weight": weight,
-                    "direction": "supports",
-                    "timestamp": node.created_at,
-                })
+                evidence_chain.append(
+                    {
+                        "fact_id": fact_id,
+                        "content": node.content,
+                        "confidence": node.confidence,
+                        "weight": weight,
+                        "direction": "supports",
+                        "timestamp": node.created_at,
+                    }
+                )
 
         # Get contradicting facts
         for fact_id, weight in self.store.get_contradicting_facts(option_id):
             node = self.store.get_node(fact_id)
             if node:
-                evidence_chain.append({
-                    "fact_id": fact_id,
-                    "content": node.content,
-                    "confidence": node.confidence,
-                    "weight": weight,
-                    "direction": "contradicts",
-                    "timestamp": node.created_at,
-                })
+                evidence_chain.append(
+                    {
+                        "fact_id": fact_id,
+                        "content": node.content,
+                        "confidence": node.confidence,
+                        "weight": weight,
+                        "direction": "contradicts",
+                        "timestamp": node.created_at,
+                    }
+                )
 
         # Sort by timestamp (most recent first)
         evidence_chain.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -777,9 +773,7 @@ class ReasoningTraces:
 
         return new_confidence
 
-    def _get_all_outcomes_for_fact(
-        self, fact_id: str
-    ) -> list[tuple[str, bool, int]]:
+    def _get_all_outcomes_for_fact(self, fact_id: str) -> list[tuple[str, bool, int]]:
         """
         Get all outcomes linked to a fact with their validation status.
 
@@ -893,9 +887,7 @@ class ReasoningTraces:
 
         return list(decisions.values())
 
-    def get_supporting_facts_for_decision(
-        self, decision_id: str
-    ) -> list[tuple[str, str, float]]:
+    def get_supporting_facts_for_decision(self, decision_id: str) -> list[tuple[str, str, float]]:
         """
         Get all facts supporting options in this decision.
 

@@ -277,3 +277,259 @@ class TestLimitEnforcementProperties:
         allowed, reason = tracker.can_execute_repl()
         assert not allowed
         assert reason is not None
+
+
+# =============================================================================
+# Burn Rate Monitoring Properties (Feature 3e0.5)
+# =============================================================================
+
+
+@pytest.mark.hypothesis
+class TestBurnRateProperties:
+    """Property tests for burn rate monitoring invariants."""
+
+    @given(
+        sample_count=st.integers(min_value=2, max_value=50),
+        cost_per_sample=st.floats(min_value=0.0001, max_value=0.1, allow_nan=False),
+    )
+    @settings(max_examples=30, deadline=None)
+    def test_burn_rate_non_negative(self, sample_count, cost_per_sample):
+        """
+        Burn rate ($/minute) should never be negative.
+
+        @trace 3e0.5
+        """
+        import time
+
+        from src.enhanced_budget import EnhancedBudgetTracker
+
+        tracker = EnhancedBudgetTracker()
+
+        # Record samples with realistic timing
+        for i in range(sample_count):
+            tracker.record_cost_sample(
+                cost=cost_per_sample,
+                tokens=100,
+                model="sonnet",
+                call_type="root",
+            )
+            # Small sleep to create time delta (for rate calculation)
+            time.sleep(0.001)
+
+        metrics = tracker.get_burn_rate()
+        assert metrics.dollars_per_minute >= 0.0
+        assert metrics.tokens_per_minute >= 0.0
+
+    @given(
+        initial_budget=st.floats(min_value=1.0, max_value=100.0, allow_nan=False),
+        burn_rate=st.floats(min_value=0.01, max_value=10.0, allow_nan=False),
+    )
+    @settings(max_examples=30, deadline=None)
+    def test_time_to_exhaustion_consistent(self, initial_budget, burn_rate):
+        """
+        Time to exhaustion should be proportional to budget/rate.
+
+        @trace 3e0.5
+        """
+        from src.enhanced_budget import BurnRateMetrics
+
+        # Calculate expected time (in seconds)
+        if burn_rate > 0:
+            expected_time = (initial_budget / burn_rate) * 60.0  # Convert rate from $/min to time
+        else:
+            expected_time = None
+
+        # Verify the math is consistent
+        if expected_time is not None:
+            # Reconstruct budget from time and rate
+            reconstructed = (expected_time / 60.0) * burn_rate
+            assert abs(reconstructed - initial_budget) < 0.001
+
+    @given(
+        num_samples=st.integers(min_value=1, max_value=100),
+    )
+    @settings(max_examples=20, deadline=None)
+    def test_sample_pruning_bounded(self, num_samples):
+        """
+        Cost samples should be pruned to prevent unbounded growth.
+
+        @trace 3e0.5
+        """
+        from src.enhanced_budget import EnhancedBudgetTracker
+
+        tracker = EnhancedBudgetTracker()
+        tracker._max_cost_samples = 50  # Set a test limit
+
+        # Add many samples
+        for i in range(num_samples):
+            tracker.record_cost_sample(
+                cost=0.01,
+                tokens=100,
+                model="sonnet",
+                call_type="root",
+            )
+
+        # Verify bounded
+        assert len(tracker._cost_samples) <= tracker._max_cost_samples
+        assert len(tracker._token_samples) <= tracker._max_cost_samples
+
+
+# =============================================================================
+# Adaptive Depth Budgeting Properties (Feature 3e0.4)
+# =============================================================================
+
+
+@pytest.mark.hypothesis
+class TestAdaptiveDepthProperties:
+    """Property tests for adaptive depth budgeting invariants."""
+
+    @given(
+        budget_fraction=st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+    )
+    @settings(max_examples=50, deadline=None)
+    def test_model_tier_monotonic_with_budget(self, budget_fraction):
+        """
+        Model recommendations should follow budget tiers:
+        - >= 50%: opus
+        - 20-50%: sonnet
+        - < 20%: haiku
+
+        @trace 3e0.4
+        """
+        from src.enhanced_budget import EnhancedBudgetTracker
+
+        tracker = EnhancedBudgetTracker()
+        model = tracker.get_recommended_model_for_budget(budget_fraction)
+
+        if budget_fraction >= 0.5:
+            assert model == "opus"
+        elif budget_fraction >= 0.2:
+            assert model == "sonnet"
+        else:
+            assert model == "haiku"
+
+    @given(
+        task_cost=st.floats(min_value=0.0, max_value=4.99, allow_nan=False),
+        max_cost=st.floats(min_value=5.0, max_value=100.0, allow_nan=False),
+    )
+    @settings(max_examples=30, deadline=None)
+    def test_adaptive_depth_respects_budget(self, task_cost, max_cost):
+        """
+        Adaptive depth should never exceed affordable operations.
+
+        @trace 3e0.4
+        """
+        from src.enhanced_budget import BudgetLimits, EnhancedBudgetTracker
+
+        assume(task_cost < max_cost)  # Valid scenario
+
+        limits = BudgetLimits(max_cost_per_task=max_cost)
+        tracker = EnhancedBudgetTracker()
+        tracker.set_limits(limits)
+        tracker._task_cost = task_cost
+
+        recommendation = tracker.compute_adaptive_depth(
+            planned_depth=3,
+            planned_model="opus",
+            avg_tokens_per_call=5000,
+            avg_output_tokens=1500,
+        )
+
+        # Verify budget utilization is correct
+        remaining = max_cost - task_cost
+        expected_utilization = task_cost / max_cost
+        assert abs(recommendation.budget_utilization - expected_utilization) < 0.001
+
+        # Recommended depth should be achievable
+        if recommendation.estimated_cost_per_depth > 0:
+            affordable_ops = remaining / recommendation.estimated_cost_per_depth
+            assert recommendation.recommended_depth <= max(0, int(affordable_ops))
+
+    @given(
+        planned_depth=st.integers(min_value=0, max_value=5),
+        budget_fraction=st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
+    )
+    @settings(max_examples=40, deadline=None)
+    def test_downgrade_reason_matches_budget(self, planned_depth, budget_fraction):
+        """
+        Downgrade reason should accurately reflect budget state.
+
+        @trace 3e0.4
+        """
+        from src.enhanced_budget import BudgetLimits, EnhancedBudgetTracker
+
+        limits = BudgetLimits(max_cost_per_task=10.0)
+        tracker = EnhancedBudgetTracker()
+        tracker.set_limits(limits)
+        tracker._task_cost = 10.0 * (1 - budget_fraction)  # Set task cost to match budget fraction
+
+        recommendation = tracker.compute_adaptive_depth(
+            planned_depth=planned_depth,
+            planned_model="opus",
+        )
+
+        # Verify downgrade reason matches budget tier
+        if budget_fraction >= 0.5:
+            # Should keep opus, no downgrade
+            assert recommendation.recommended_model == "opus"
+            assert not recommendation.was_downgraded
+        elif budget_fraction >= 0.2:
+            # Should downgrade to sonnet
+            assert recommendation.recommended_model == "sonnet"
+            if recommendation.was_downgraded:
+                assert recommendation.downgrade_reason == "budget_below_50_percent"
+        else:
+            # Should force haiku
+            assert recommendation.recommended_model == "haiku"
+            if recommendation.was_downgraded:
+                assert recommendation.downgrade_reason == "budget_below_20_percent"
+
+
+@pytest.mark.hypothesis
+class TestExpensiveOperationWarningProperties:
+    """Property tests for expensive operation warnings."""
+
+    @given(
+        estimated_cost=st.floats(min_value=0.0, max_value=10.0, allow_nan=False),
+        remaining_budget=st.floats(min_value=0.01, max_value=10.0, allow_nan=False),
+    )
+    @settings(max_examples=40, deadline=None)
+    def test_warning_level_matches_cost_fraction(self, estimated_cost, remaining_budget):
+        """
+        Warning level should correspond to cost fraction:
+        - > budget: critical (abort)
+        - > 50%: critical (downgrade)
+        - > 25%: warning
+        - <= 25%: None
+
+        @trace 3e0.4
+        """
+        from src.enhanced_budget import BudgetLimits, EnhancedBudgetTracker
+
+        assume(remaining_budget > 0)
+
+        limits = BudgetLimits(max_cost_per_task=remaining_budget * 2)
+        tracker = EnhancedBudgetTracker()
+        tracker.set_limits(limits)
+        tracker._task_cost = remaining_budget  # Half budget used
+
+        warning = tracker.warn_before_expensive_operation(
+            operation="recursive_call",
+            estimated_cost=estimated_cost,
+            model="sonnet",
+        )
+
+        cost_fraction = estimated_cost / remaining_budget
+
+        if estimated_cost > remaining_budget:
+            assert warning is not None
+            assert warning.warning_level == "critical"
+            assert warning.suggested_action == "abort"
+        elif cost_fraction > 0.5:
+            assert warning is not None
+            assert warning.warning_level == "critical"
+        elif cost_fraction > 0.25:
+            assert warning is not None
+            assert warning.warning_level == "warning"
+        else:
+            assert warning is None

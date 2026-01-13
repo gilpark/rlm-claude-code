@@ -121,9 +121,7 @@ class StrategyStats:
             return float("inf")  # Always try unused strategies
 
         exploitation = self.avg_score
-        exploration = exploration_factor * math.sqrt(
-            math.log(total_trials + 1) / self.total_uses
-        )
+        exploration = exploration_factor * math.sqrt(math.log(total_trials + 1) / self.total_uses)
 
         return exploitation + exploration
 
@@ -186,15 +184,11 @@ class StrategyTracker:
         # Persist
         self._save()
 
-    def get_stats(
-        self, strategy_type: StrategyType, strategy_id: str
-    ) -> StrategyStats | None:
+    def get_stats(self, strategy_type: StrategyType, strategy_id: str) -> StrategyStats | None:
         """Get stats for a specific strategy."""
         return self._stats.get(self._key(strategy_type, strategy_id))
 
-    def get_all_stats(
-        self, strategy_type: StrategyType | None = None
-    ) -> list[StrategyStats]:
+    def get_all_stats(self, strategy_type: StrategyType | None = None) -> list[StrategyStats]:
         """Get all stats, optionally filtered by type."""
         stats = list(self._stats.values())
         if strategy_type:
@@ -230,9 +224,7 @@ class StrategyTracker:
         else:  # ucb
             return self._select_ucb(strategy_type, available_ids)
 
-    def _select_ucb(
-        self, strategy_type: StrategyType, available_ids: list[str]
-    ) -> str:
+    def _select_ucb(self, strategy_type: StrategyType, available_ids: list[str]) -> str:
         """Select using Upper Confidence Bound."""
         best_id = available_ids[0]
         best_score = float("-inf")
@@ -250,9 +242,7 @@ class StrategyTracker:
 
         return best_id
 
-    def _select_greedy(
-        self, strategy_type: StrategyType, available_ids: list[str]
-    ) -> str:
+    def _select_greedy(self, strategy_type: StrategyType, available_ids: list[str]) -> str:
         """Select best known strategy."""
         best_id = available_ids[0]
         best_score = float("-inf")
@@ -358,9 +348,7 @@ class UserFeedbackCollector:
         self.tracker = tracker
         self._pending_feedback: dict[str, StrategyOutcome] = {}
 
-    def register_for_feedback(
-        self, outcome: StrategyOutcome, feedback_id: str
-    ) -> None:
+    def register_for_feedback(self, outcome: StrategyOutcome, feedback_id: str) -> None:
         """
         Register an outcome that may receive feedback.
 
@@ -370,9 +358,7 @@ class UserFeedbackCollector:
         """
         self._pending_feedback[feedback_id] = outcome
 
-    def process_feedback(
-        self, feedback_id: str, feedback: FeedbackType
-    ) -> bool:
+    def process_feedback(self, feedback_id: str, feedback: FeedbackType) -> bool:
         """
         Process user feedback for a pending outcome.
 

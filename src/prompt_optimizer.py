@@ -488,28 +488,34 @@ class PromptLibrary:
 
             # Check for issues
             if stats.success_rate < 0.7:
-                recommendations.append({
-                    "variant_id": variant.id,
-                    "issue": "low_success_rate",
-                    "value": stats.success_rate,
-                    "suggestion": "Consider revising prompt structure or adding examples",
-                })
+                recommendations.append(
+                    {
+                        "variant_id": variant.id,
+                        "issue": "low_success_rate",
+                        "value": stats.success_rate,
+                        "suggestion": "Consider revising prompt structure or adding examples",
+                    }
+                )
 
             if stats.avg_tokens > 5000:
-                recommendations.append({
-                    "variant_id": variant.id,
-                    "issue": "high_token_usage",
-                    "value": stats.avg_tokens,
-                    "suggestion": "Consider making prompt more concise",
-                })
+                recommendations.append(
+                    {
+                        "variant_id": variant.id,
+                        "issue": "high_token_usage",
+                        "value": stats.avg_tokens,
+                        "suggestion": "Consider making prompt more concise",
+                    }
+                )
 
             if stats.feedback_score < -0.3:
-                recommendations.append({
-                    "variant_id": variant.id,
-                    "issue": "negative_feedback",
-                    "value": stats.feedback_score,
-                    "suggestion": "Review user feedback patterns",
-                })
+                recommendations.append(
+                    {
+                        "variant_id": variant.id,
+                        "issue": "negative_feedback",
+                        "value": stats.feedback_score,
+                        "suggestion": "Review user feedback patterns",
+                    }
+                )
 
         return recommendations
 

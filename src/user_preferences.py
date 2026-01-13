@@ -389,9 +389,7 @@ class PreferencesManager:
 
     def _record_update(self, field: str, old: Any, new: Any) -> None:
         """Record a preference update."""
-        self._update_history.append(
-            PreferenceUpdate(field=field, old_value=old, new_value=new)
-        )
+        self._update_history.append(PreferenceUpdate(field=field, old_value=old, new_value=new))
 
     def get_update_history(self) -> list[PreferenceUpdate]:
         """Get history of preference updates."""

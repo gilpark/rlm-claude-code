@@ -33,7 +33,17 @@ from .context_manager import (
 )
 
 # Enhanced budget tracking (SPEC-05)
-from .enhanced_budget import BudgetAlert, BudgetLimits, EnhancedBudgetMetrics, EnhancedBudgetTracker
+from .enhanced_budget import (
+    AdaptiveDepthRecommendation,
+    BudgetAlert,
+    BudgetLimits,
+    BurnRateAlert,
+    BurnRateMetrics,
+    CostSample,
+    DepthBudgetWarning,
+    EnhancedBudgetMetrics,
+    EnhancedBudgetTracker,
+)
 from .intelligent_orchestrator import IntelligentOrchestrator
 from .local_orchestrator import RECOMMENDED_CONFIGS, LocalModelConfig, LocalOrchestrator
 from .memory_evolution import ConsolidationResult, DecayResult, MemoryEvolution, PromotionResult
@@ -49,6 +59,16 @@ from .orchestration_logger import (
     set_logger,
 )
 from .orchestration_schema import ExecutionMode, OrchestrationPlan, ToolAccessLevel
+
+# Orchestration telemetry (Feature 3e0.6)
+from .orchestration_telemetry import (
+    HeuristicAccuracy,
+    HeuristicOutcome,
+    OrchestrationTelemetry,
+    TelemetryConfig,
+    TelemetryDecisionLog,
+    TelemetryReport,
+)
 from .orchestrator import RLMOrchestrator
 
 # Progress reporting (SPEC-01.05 - Phase 4)
@@ -155,6 +175,20 @@ __all__ = [
     "EnhancedBudgetMetrics",
     "BudgetLimits",
     "BudgetAlert",
+    # Burn rate monitoring (Feature 3e0.5)
+    "BurnRateMetrics",
+    "BurnRateAlert",
+    "CostSample",
+    # Adaptive depth budgeting (Feature 3e0.4)
+    "AdaptiveDepthRecommendation",
+    "DepthBudgetWarning",
+    # Orchestration telemetry (Feature 3e0.6)
+    "OrchestrationTelemetry",
+    "TelemetryConfig",
+    "TelemetryDecisionLog",
+    "TelemetryReport",
+    "HeuristicAccuracy",
+    "HeuristicOutcome",
     # Tokenization (SPEC-01.01 - Phase 4)
     "Chunk",
     "ChunkingConfig",

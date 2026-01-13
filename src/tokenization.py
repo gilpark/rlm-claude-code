@@ -139,7 +139,9 @@ def detect_language(content: str) -> str | None:
     # Simple heuristics - could be enhanced with more sophisticated detection
     if re.search(r"^\s*def\s+\w+\s*\(|^\s*class\s+\w+.*:", content, re.MULTILINE):
         return "python"
-    if re.search(r"^\s*(?:export\s+)?(?:function|const|let|var|interface|type)\s+", content, re.MULTILINE):
+    if re.search(
+        r"^\s*(?:export\s+)?(?:function|const|let|var|interface|type)\s+", content, re.MULTILINE
+    ):
         if re.search(r":\s*(?:string|number|boolean|any|\w+\[\]|Record<)", content):
             return "typescript"
         return "javascript"
@@ -273,7 +275,9 @@ def token_aware_chunk(
 
     def tokens_in_range(start: int, end: int) -> int:
         """Get token count for content[start:end] in O(1)."""
-        return cumulative_tokens[min(end, len(content))] - cumulative_tokens[min(start, len(content))]
+        return (
+            cumulative_tokens[min(end, len(content))] - cumulative_tokens[min(start, len(content))]
+        )
 
     # Build chunks
     chunks: list[tuple[str, int]] = []
@@ -330,7 +334,9 @@ def token_aware_chunk(
         if overlap_tokens > 0:
             # Find position that gives us overlap_tokens before best_end
             target_overlap_start_tokens = cumulative_tokens[best_end] - overlap_tokens
-            target_overlap_start_tokens = max(target_overlap_start_tokens, cumulative_tokens[current_start])
+            target_overlap_start_tokens = max(
+                target_overlap_start_tokens, cumulative_tokens[current_start]
+            )
 
             # Binary search for overlap start
             low, high = current_start, best_end

@@ -412,7 +412,10 @@ class CostTracker:
 
         new_total_cost = self.total_cost + estimate.estimated_cost
         if new_total_cost > self.budget_dollars:
-            return True, f"Would exceed cost budget (${new_total_cost:.2f} > ${self.budget_dollars:.2f})"
+            return (
+                True,
+                f"Would exceed cost budget (${new_total_cost:.2f} > ${self.budget_dollars:.2f})",
+            )
 
         return False, None
 

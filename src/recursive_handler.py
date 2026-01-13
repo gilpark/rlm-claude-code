@@ -35,6 +35,7 @@ class RecursiveREPL:
     - Cost tracking and enforcement
     - Result aggregation from child REPLs
     - Trajectory event emission for observability
+    - Adaptive depth budgeting (Feature 3e0.4)
     """
 
     def __init__(
@@ -46,6 +47,7 @@ class RecursiveREPL:
         router: ModelRouter | None = None,
         trajectory: TrajectoryStream | None = None,
         parent: RecursiveREPL | None = None,
+        budget_tracker: Any | None = None,
     ):
         """
         Initialize recursive REPL.
@@ -58,6 +60,7 @@ class RecursiveREPL:
             router: Model router for API calls
             trajectory: Trajectory stream for event logging
             parent: Parent REPL (for cost aggregation)
+            budget_tracker: Optional EnhancedBudgetTracker for adaptive depth
         """
         self.context = context
         self.depth = depth
@@ -67,11 +70,16 @@ class RecursiveREPL:
         self.trajectory = trajectory
         self.parent = parent
         self.child_repls: list[RecursiveREPL] = []
+        self.budget_tracker = budget_tracker
 
         # Cost tracking
         self._tokens_used = 0
         self._recursive_calls = 0
         self._results: list[RecursiveCallResult] = []
+
+        # Adaptive depth state (Feature 3e0.4)
+        self._model_override: str | None = None  # Override from adaptive depth
+        self._depth_override: int | None = None  # Override from adaptive depth
 
         # Create REPL environment if context is SessionContext
         if isinstance(context, SessionContext):
@@ -141,9 +149,34 @@ class RecursiveREPL:
             RecursionDepthError: If max depth exceeded
             CostLimitError: If cost limits exceeded
         """
+        # Apply adaptive depth if budget tracker available (Feature 3e0.4)
+        effective_max_depth = self.max_depth
+        if self.budget_tracker is not None and self._model_override is None:
+            try:
+                recommendation = self.budget_tracker.compute_adaptive_depth(
+                    planned_depth=self.max_depth,
+                    planned_model=self.get_model_for_depth(),
+                )
+                if recommendation.was_downgraded:
+                    self._model_override = recommendation.recommended_model
+                    effective_max_depth = min(self.max_depth, recommendation.recommended_depth)
+                    self._depth_override = effective_max_depth
+
+                    # Emit trajectory event for model downgrade
+                    if self.trajectory:
+                        self.trajectory.emit_model_downgrade(
+                            original_model=recommendation.original_model,
+                            new_model=recommendation.recommended_model,
+                            reason=recommendation.downgrade_reason or "budget_constraint",
+                            budget_utilization=recommendation.budget_utilization,
+                        )
+            except Exception:
+                # Don't fail on adaptive depth errors, just continue with defaults
+                pass
+
         # Check depth limit
-        if self.depth >= self.max_depth:
-            raise RecursionDepthError(self.depth + 1, self.max_depth)
+        if self.depth >= effective_max_depth:
+            raise RecursionDepthError(self.depth + 1, effective_max_depth)
 
         # Check cost limits before making call
         self._check_cost_limits()
@@ -204,15 +237,22 @@ class RecursiveREPL:
         """
         start_time = time.time()
 
+        # Use depth override if set by adaptive budgeting
+        effective_max_depth = self._depth_override or self.max_depth
+
         child = RecursiveREPL(
             context=context,
             depth=self.depth + 1,
-            max_depth=self.max_depth,
+            max_depth=effective_max_depth,
             config=self.config,
             router=self.router,
             trajectory=self.trajectory,
             parent=self,
+            budget_tracker=self.budget_tracker,  # Pass down for adaptive depth
         )
+        # Inherit model override if set
+        if self._model_override:
+            child._model_override = self._model_override
         self.child_repls.append(child)
 
         # Run RLM loop in child
@@ -406,7 +446,12 @@ Respond with focused analysis. Spawn recursive calls for complex sub-tasks."""
         Depth 0 (root): Opus (most capable)
         Depth 1: Sonnet (balanced)
         Depth 2+: Haiku (fast, cost-effective)
+
+        May be overridden by adaptive depth budgeting (Feature 3e0.4).
         """
+        # Use override if set by adaptive depth
+        if self._model_override is not None:
+            return self._model_override
         return self.router.get_model(self.depth)
 
     def inject_tool_result(self, result: Any) -> None:

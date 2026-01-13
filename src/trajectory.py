@@ -357,6 +357,31 @@ class TrajectoryStream:
         )
         self._emit_sync(event)
 
+    def emit_model_downgrade(
+        self,
+        original_model: str,
+        new_model: str,
+        reason: str,
+        budget_utilization: float,
+    ) -> None:
+        """
+        Emit model downgrade event from adaptive depth budgeting.
+
+        Feature 3e0.4 - Adaptive Depth Budgeting
+        """
+        event = TrajectoryEvent(
+            type=TrajectoryEventType.BUDGET_ALERT,
+            depth=0,
+            content=f"Model downgrade: {original_model} → {new_model} ({reason})",
+            metadata={
+                "original_model": original_model,
+                "new_model": new_model,
+                "reason": reason,
+                "budget_utilization": budget_utilization,
+            },
+        )
+        self._emit_sync(event)
+
     def _emit_sync(self, event: TrajectoryEvent) -> None:
         """Emit event synchronously (for non-async contexts)."""
         # Just append to events list directly for sync contexts

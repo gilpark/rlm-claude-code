@@ -46,7 +46,9 @@ class ActivationDecision:
                 "references_multiple_files": self.signals.references_multiple_files,
                 "requires_cross_context_reasoning": self.signals.requires_cross_context_reasoning,
                 "debugging_task": self.signals.debugging_task,
-            } if self.signals else None,
+            }
+            if self.signals
+            else None,
         }
 
 
@@ -95,9 +97,8 @@ class ActivationStats:
 
         # Update average time
         self.avg_decision_time_ms = (
-            (self.avg_decision_time_ms * (self.total_decisions - 1) + decision.decision_time_ms)
-            / self.total_decisions
-        )
+            self.avg_decision_time_ms * (self.total_decisions - 1) + decision.decision_time_ms
+        ) / self.total_decisions
 
         # Track reasons
         reason_key = decision.reason.split(":")[0]  # Get base reason
@@ -110,12 +111,11 @@ class ActivationStats:
             "activations": self.activations,
             "skips": self.skips,
             "overrides": self.overrides,
-            "activation_rate": self.activations / self.total_decisions if self.total_decisions > 0 else 0.0,
+            "activation_rate": self.activations / self.total_decisions
+            if self.total_decisions > 0
+            else 0.0,
             "avg_decision_time_ms": self.avg_decision_time_ms,
-            "top_reasons": dict(sorted(
-                self.activation_reasons.items(),
-                key=lambda x: -x[1]
-            )[:5]),
+            "top_reasons": dict(sorted(self.activation_reasons.items(), key=lambda x: -x[1])[:5]),
         }
 
 

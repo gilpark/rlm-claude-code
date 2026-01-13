@@ -271,7 +271,11 @@ class GLiNERExtractor:
 
         try:
             # Truncate if needed
-            text = query[: self.config.max_length * 4] if len(query) > self.config.max_length * 4 else query
+            text = (
+                query[: self.config.max_length * 4]
+                if len(query) > self.config.max_length * 4
+                else query
+            )
 
             # Extract entities using GLiNER
             labels = list(SIGNAL_SCHEMA.keys())
@@ -335,9 +339,7 @@ class GLiNERExtractor:
             if signal.signal_type not in type_scores:
                 type_scores[signal.signal_type] = signal.score
             else:
-                type_scores[signal.signal_type] = max(
-                    type_scores[signal.signal_type], signal.score
-                )
+                type_scores[signal.signal_type] = max(type_scores[signal.signal_type], signal.score)
 
         for signal_type, score in type_scores.items():
             weight = SIGNAL_WEIGHTS.get(signal_type, 0.5)
@@ -350,9 +352,7 @@ class GLiNERExtractor:
         # Normalize to 0-1
         return min(1.0, weighted_sum / max_possible)
 
-    def _fallback_extract(
-        self, query: str, start_time: float
-    ) -> SignalExtractionResult:
+    def _fallback_extract(self, query: str, start_time: float) -> SignalExtractionResult:
         """
         Fallback extraction using keyword matching.
 
@@ -390,9 +390,7 @@ class GLiNERExtractor:
             model_used="keyword_fallback",
         )
 
-    def get_weighted_rules_result(
-        self, signals: SignalExtractionResult
-    ) -> dict[str, Any]:
+    def get_weighted_rules_result(self, signals: SignalExtractionResult) -> dict[str, Any]:
         """
         Apply weighted rules to signals to produce activation decision.
 
@@ -410,9 +408,7 @@ class GLiNERExtractor:
         HIGH_WEIGHT_SIGNALS = {"architectural", "synthesis", "multi_file"}
 
         # Check for high-weight signals
-        has_high_weight = any(
-            s in signals.signal_types for s in HIGH_WEIGHT_SIGNALS
-        )
+        has_high_weight = any(s in signals.signal_types for s in HIGH_WEIGHT_SIGNALS)
 
         # Check complexity score
         high_complexity = signals.complexity_score >= COMPLEXITY_THRESHOLD
@@ -426,7 +422,9 @@ class GLiNERExtractor:
             matching = [s for s in signals.signal_types if s in HIGH_WEIGHT_SIGNALS]
             reasons.append(f"high-weight signals: {matching}")
         if high_complexity:
-            reasons.append(f"complexity score {signals.complexity_score:.2f} >= {COMPLEXITY_THRESHOLD}")
+            reasons.append(
+                f"complexity score {signals.complexity_score:.2f} >= {COMPLEXITY_THRESHOLD}"
+            )
 
         return {
             "activate_rlm": activate_rlm,

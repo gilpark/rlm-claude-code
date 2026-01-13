@@ -296,9 +296,7 @@ class SetFitClassifier:
             return ComplexityLevel.COMPLEX
         return ComplexityLevel.SIMPLE
 
-    def _infer_signals(
-        self, complexity: ComplexityLevel, query: str
-    ) -> list[SignalType]:
+    def _infer_signals(self, complexity: ComplexityLevel, query: str) -> list[SignalType]:
         """Infer signals from complexity level and query keywords."""
         signals: list[SignalType] = []
         query_lower = query.lower()

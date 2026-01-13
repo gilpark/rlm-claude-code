@@ -358,8 +358,7 @@ class QueryClassifier:
             for qt, patterns in self.patterns.items()
         }
         self._complexity_compiled = {
-            re.compile(p, re.IGNORECASE): score
-            for p, score in self.COMPLEXITY_SIGNALS.items()
+            re.compile(p, re.IGNORECASE): score for p, score in self.COMPLEXITY_SIGNALS.items()
         }
 
     def classify(self, query: str) -> QueryClassification:
@@ -479,7 +478,9 @@ class SmartRouter:
                 reason=f"Forced model: {force_model}",
                 provider=provider,
                 estimated_cost=MODEL_CATALOG.get(force_model, MODEL_CATALOG["sonnet"]).cost_factor,
-                estimated_speed=MODEL_CATALOG.get(force_model, MODEL_CATALOG["sonnet"]).speed_factor,
+                estimated_speed=MODEL_CATALOG.get(
+                    force_model, MODEL_CATALOG["sonnet"]
+                ).speed_factor,
             )
 
         # Classify query
@@ -490,16 +491,12 @@ class SmartRouter:
 
         # Filter by available providers
         candidates = [
-            m for m in candidates
-            if MODEL_CATALOG[m].provider in self.available_providers
+            m for m in candidates if MODEL_CATALOG[m].provider in self.available_providers
         ]
 
         # Filter by forced provider
         if self.force_provider:
-            candidates = [
-                m for m in candidates
-                if MODEL_CATALOG[m].provider == self.force_provider
-            ]
+            candidates = [m for m in candidates if MODEL_CATALOG[m].provider == self.force_provider]
 
         # Apply context adjustments
         if context:
@@ -513,7 +510,9 @@ class SmartRouter:
 
         # Ensure we have at least one candidate
         if not candidates:
-            candidates = ["sonnet"] if Provider.ANTHROPIC in self.available_providers else ["gpt-4o"]
+            candidates = (
+                ["sonnet"] if Provider.ANTHROPIC in self.available_providers else ["gpt-4o"]
+            )
 
         primary = candidates[0]
         primary_info = MODEL_CATALOG.get(primary, MODEL_CATALOG["sonnet"])
@@ -548,12 +547,14 @@ class SmartRouter:
         )
 
         # Track
-        self._routing_history.append({
-            "query": query[:100],
-            "type": classification.query_type.value,
-            "model": primary,
-            "provider": primary_info.provider.value,
-        })
+        self._routing_history.append(
+            {
+                "query": query[:100],
+                "type": classification.query_type.value,
+                "model": primary,
+                "provider": primary_info.provider.value,
+            }
+        )
 
         return decision
 
@@ -589,7 +590,9 @@ class SmartRouter:
         depth = context.get("depth", 0)
         if depth > 0:
             # For recursive calls, prefer faster/cheaper models
-            fast_models = [m for m in result if MODEL_CATALOG[m].tier in (ModelTier.FAST, ModelTier.BALANCED)]
+            fast_models = [
+                m for m in result if MODEL_CATALOG[m].tier in (ModelTier.FAST, ModelTier.BALANCED)
+            ]
             if fast_models:
                 result = fast_models + [m for m in result if m not in fast_models]
 
@@ -607,9 +610,7 @@ class SmartRouter:
 
         return result
 
-    def record_outcome(
-        self, query: str, model_used: str, success: bool, latency_ms: float
-    ) -> None:
+    def record_outcome(self, query: str, model_used: str, success: bool, latency_ms: float) -> None:
         """Record routing outcome for learning."""
         for entry in reversed(self._routing_history[-100:]):
             if entry["query"] == query[:100]:
@@ -683,12 +684,14 @@ class FallbackExecutor:
                 latency = (time.time() - start) * 1000
 
                 self.router.record_outcome(query, model, success=True, latency_ms=latency)
-                self._execution_history.append({
-                    "query": query[:100],
-                    "model": model,
-                    "success": True,
-                    "latency_ms": latency,
-                })
+                self._execution_history.append(
+                    {
+                        "query": query[:100],
+                        "model": model,
+                        "success": True,
+                        "latency_ms": latency,
+                    }
+                )
 
                 return result, model
 
@@ -697,13 +700,15 @@ class FallbackExecutor:
                 last_error = e
 
                 self.router.record_outcome(query, model, success=False, latency_ms=latency)
-                self._execution_history.append({
-                    "query": query[:100],
-                    "model": model,
-                    "success": False,
-                    "error": str(e),
-                    "latency_ms": latency,
-                })
+                self._execution_history.append(
+                    {
+                        "query": query[:100],
+                        "model": model,
+                        "success": False,
+                        "error": str(e),
+                        "latency_ms": latency,
+                    }
+                )
                 continue
 
         raise last_error or RuntimeError("All models failed")
