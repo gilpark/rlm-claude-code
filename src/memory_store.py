@@ -785,6 +785,148 @@ class MemoryStore:
             conn.close()
 
     # =========================================================================
+    # Convenience Methods for Node Creation
+    # =========================================================================
+
+    def add_fact(
+        self,
+        content: str,
+        confidence: float = 0.8,
+        tier: str = "session",
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Add a fact to memory (convenience method).
+
+        Args:
+            content: The factual statement
+            confidence: Confidence score 0.0-1.0 (default 0.8)
+            tier: Memory tier - "task", "session", or "long_term" (default "session")
+            metadata: Optional additional metadata
+
+        Returns:
+            Node ID (UUID string)
+
+        Example:
+            >>> store = MemoryStore(":memory:")
+            >>> fact_id = store.add_fact("Auth uses JWT tokens", confidence=0.9)
+            >>> fact_id = store.add_fact("Redis cache TTL is 5 minutes")
+        """
+        return self.create_node(
+            node_type="fact",
+            content=content,
+            tier=tier,
+            confidence=confidence,
+            metadata=metadata,
+        )
+
+    def add_experience(
+        self,
+        content: str,
+        outcome: str,
+        success: bool = True,
+        confidence: float = 0.7,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Add an experience/learning to memory (convenience method).
+
+        Args:
+            content: Description of what was tried
+            outcome: What happened as a result
+            success: Whether the outcome was positive (default True)
+            confidence: Confidence score 0.0-1.0 (default 0.7)
+            metadata: Optional additional metadata
+
+        Returns:
+            Node ID (UUID string)
+
+        Example:
+            >>> store = MemoryStore(":memory:")
+            >>> exp_id = store.add_experience(
+            ...     "Tried map_reduce on large file",
+            ...     outcome="Faster than sequential processing",
+            ...     success=True
+            ... )
+        """
+        full_metadata = {"outcome": outcome, "success": success}
+        if metadata:
+            full_metadata.update(metadata)
+        return self.create_node(
+            node_type="experience",
+            content=content,
+            tier="session",
+            confidence=confidence,
+            metadata=full_metadata,
+        )
+
+    def add_entity(
+        self,
+        name: str,
+        entity_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """
+        Add an entity (person, file, concept) to memory (convenience method).
+
+        Args:
+            name: Entity name/identifier
+            entity_type: Type like "file", "function", "person", "concept"
+            metadata: Optional additional metadata
+
+        Returns:
+            Node ID (UUID string)
+
+        Example:
+            >>> store = MemoryStore(":memory:")
+            >>> file_id = store.add_entity("auth.py", entity_type="file")
+            >>> person_id = store.add_entity("Alice", entity_type="person")
+        """
+        full_metadata = {}
+        if entity_type:
+            full_metadata["entity_type"] = entity_type
+        if metadata:
+            full_metadata.update(metadata)
+        return self.create_node(
+            node_type="entity",
+            content=name,
+            tier="session",
+            confidence=1.0,
+            metadata=full_metadata if full_metadata else None,
+        )
+
+    def find(
+        self,
+        query: str,
+        k: int = 10,
+        node_type: str | None = None,
+        min_confidence: float | None = None,
+    ) -> list[SearchResult]:
+        """
+        Search memory (alias for search with intuitive parameter names).
+
+        Args:
+            query: Search query (uses FTS with stemming)
+            k: Maximum number of results (default 10)
+            node_type: Filter by node type (e.g., "fact", "experience")
+            min_confidence: Minimum confidence threshold
+
+        Returns:
+            List of SearchResult objects
+
+        Example:
+            >>> store = MemoryStore(":memory:")
+            >>> results = store.find("authentication JWT")
+            >>> results = store.find("error handling", k=5, node_type="experience")
+        """
+        return self.search(
+            query=query,
+            limit=k,
+            node_type=node_type,
+            min_confidence=min_confidence,
+        )
+
+    # =========================================================================
     # Convenience Methods for Two-Node Relationships
     # =========================================================================
 

@@ -57,6 +57,39 @@ experience_id = store.create_node(
 )
 ```
 
+### Convenience Methods (Recommended)
+
+```python
+# add_fact() - Create fact nodes easily
+fact_id = store.add_fact("Auth uses JWT tokens")
+fact_id = store.add_fact(
+    "Rate limit is 100/min",
+    confidence=0.9,
+    tier="longterm",
+    metadata={"source": "config.yaml"}
+)
+
+# add_experience() - Record learnings (outcome is required)
+exp_id = store.add_experience(
+    "Refactoring reduced bugs by 50%",
+    outcome="success",         # Required: describes what happened
+    success=True,              # Optional: boolean flag (default True)
+    confidence=0.85,
+    metadata={"project": "auth-module"}
+)
+
+# add_entity() - Track code entities
+entity_id = store.add_entity(
+    "AuthService",
+    entity_type="class",       # class, function, module, variable
+    metadata={"file": "src/auth.py", "line": 42}
+)
+
+# find() - Intuitive search with k parameter (common ML API style)
+results = store.find("authentication", k=5)
+results = store.find("JWT", k=10, node_type="fact", min_confidence=0.8)
+```
+
 ### Querying Nodes
 
 ```python
@@ -240,6 +273,55 @@ print(result.output)  # Number of functions
 # Check for errors
 if not result.success:
     print(f"Error: {result.error}")
+```
+
+### ExecutionResult Properties
+
+```python
+# ExecutionResult fields
+result = env.execute("print('hello'); 42")
+
+result.success           # True if no error
+result.output            # Return value (42)
+result.stdout            # Captured print output ("hello\n")
+result.error             # Error message (None if success)
+result.execution_time_ms # Execution time
+
+# Truncation handling for large outputs
+result.output_truncated  # True if output was truncated
+result.original_length   # Original length before truncation
+
+# Pretty-print with format_output()
+result = env.execute("{'a': 1, 'b': [1, 2, 3]}")
+print(result.format_output())
+# {
+#   "a": 1,
+#   "b": [1, 2, 3]
+# }
+
+# Custom max length
+print(result.format_output(max_length=100))
+```
+
+### Enhanced Error Messages
+
+The REPL provides helpful suggestions for common errors:
+
+```python
+# NameError - suggests similar names
+result = env.execute("prnt('hello')")
+# Error: name 'prnt' is not defined
+# Did you mean: print?
+
+# KeyError - shows available keys
+result = env.execute("d = {'name': 'test'}; d['nmae']")
+# Error: 'nmae'
+# Available keys: ['name']
+
+# AttributeError - suggests similar attributes
+result = env.execute("'hello'.uper()")
+# Error: 'str' object has no attribute 'uper'
+# Did you mean: upper?
 ```
 
 ### Built-in Helper Functions
@@ -447,6 +529,7 @@ if is_definitely_simple(prompt, context):
 ```python
 from src.memory_store import MemoryStore
 from src.enhanced_budget import EnhancedBudgetTracker, CostComponent
+from src.repl_environment import ReplEnvironment
 from src.complexity_classifier import should_activate_rlm
 from src.orchestration_schema import OrchestrationPlan, ExecutionMode
 from src.types import SessionContext
@@ -456,10 +539,20 @@ store = MemoryStore(":memory:")
 tracker = EnhancedBudgetTracker(max_tokens=50_000, max_cost=2.0)
 context = SessionContext(files={"main.py": "def main(): pass"})
 
-# Store some facts
-fact_id = store.create_node("fact", "Main entry point is main.py")
-decision_id = store.create_node("decision", "Use async for I/O")
-store.link(fact_id, decision_id, "informs")
+# Store facts using convenience methods
+fact_id = store.add_fact("Main entry point is main.py", confidence=0.95)
+store.add_experience(
+    "Async I/O improved response times",
+    outcome="3x faster response times",  # Required: describes what happened
+    success=True,
+    metadata={"improvement": "3x faster"}
+)
+store.add_entity("main", entity_type="function", metadata={"file": "main.py"})
+
+# Search memory
+results = store.find("async", k=5)
+for r in results:
+    print(f"Found: {r.content[:50]}...")
 
 # Check if query needs RLM
 prompt = "Find all async functions and ensure they handle errors"
@@ -474,6 +567,14 @@ if should_activate:
     print(f"RLM activated: {reason}")
     print(f"Using model: {plan.primary_model}")
     print(f"Depth budget: {plan.depth_budget}")
+
+    # Use REPL for analysis
+    env = ReplEnvironment(context)
+    result = env.execute("list(files.keys())")
+    if result.success:
+        print(f"Files: {result.format_output()}")
+    else:
+        print(f"Error: {result.error}")
 else:
     print("Simple query - direct response")
 

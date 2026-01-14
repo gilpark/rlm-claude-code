@@ -1727,3 +1727,141 @@ class TestFTS5Search:
         # OR search
         results = memory_store.search("Python OR JavaScript")
         assert len(results) == 3
+
+
+class TestConvenienceMethods:
+    """Tests for convenience methods: add_fact, add_experience, add_entity, find."""
+
+    def test_add_fact_creates_fact_node(self, memory_store):
+        """add_fact creates a fact node with correct type."""
+        node_id = memory_store.add_fact("Auth uses JWT tokens")
+
+        node = memory_store.get_node(node_id)
+        assert node is not None
+        assert node.type == "fact"
+        assert node.content == "Auth uses JWT tokens"
+
+    def test_add_fact_with_confidence(self, memory_store):
+        """add_fact accepts confidence parameter."""
+        node_id = memory_store.add_fact("High confidence fact", confidence=0.95)
+
+        node = memory_store.get_node(node_id)
+        assert node.confidence == 0.95
+
+    def test_add_fact_default_confidence(self, memory_store):
+        """add_fact uses default confidence of 0.8."""
+        node_id = memory_store.add_fact("Default confidence fact")
+
+        node = memory_store.get_node(node_id)
+        assert node.confidence == 0.8
+
+    def test_add_fact_with_tier(self, memory_store):
+        """add_fact accepts tier parameter."""
+        node_id = memory_store.add_fact("Long term fact", tier="longterm")
+
+        node = memory_store.get_node(node_id)
+        assert node.tier == "longterm"
+
+    def test_add_fact_with_metadata(self, memory_store):
+        """add_fact accepts metadata parameter."""
+        node_id = memory_store.add_fact(
+            "Fact with metadata",
+            metadata={"source": "config.yaml", "line": 42}
+        )
+
+        node = memory_store.get_node(node_id)
+        assert node.metadata["source"] == "config.yaml"
+        assert node.metadata["line"] == 42
+
+    def test_add_experience_creates_experience_node(self, memory_store):
+        """add_experience creates an experience node."""
+        node_id = memory_store.add_experience("Refactoring reduced bugs", outcome="success")
+
+        node = memory_store.get_node(node_id)
+        assert node is not None
+        assert node.type == "experience"
+        assert node.content == "Refactoring reduced bugs"
+
+    def test_add_experience_with_outcome(self, memory_store):
+        """add_experience stores outcome in metadata."""
+        node_id = memory_store.add_experience(
+            "Successful refactor",
+            outcome="success"
+        )
+
+        node = memory_store.get_node(node_id)
+        assert node.metadata["outcome"] == "success"
+
+    def test_add_experience_with_all_params(self, memory_store):
+        """add_experience accepts all parameters."""
+        node_id = memory_store.add_experience(
+            "Complex experience",
+            outcome="failure",
+            success=False,
+            confidence=0.7,
+            metadata={"project": "auth"}
+        )
+
+        node = memory_store.get_node(node_id)
+        assert node.metadata["outcome"] == "failure"
+        assert node.metadata["project"] == "auth"
+        assert node.metadata["success"] is False
+        assert node.confidence == 0.7
+
+    def test_add_entity_creates_entity_node(self, memory_store):
+        """add_entity creates an entity node."""
+        node_id = memory_store.add_entity("AuthService")
+
+        node = memory_store.get_node(node_id)
+        assert node is not None
+        assert node.type == "entity"
+        assert node.content == "AuthService"
+
+    def test_add_entity_with_entity_type(self, memory_store):
+        """add_entity stores entity_type in metadata."""
+        node_id = memory_store.add_entity("AuthService", entity_type="class")
+
+        node = memory_store.get_node(node_id)
+        assert node.metadata["entity_type"] == "class"
+
+    def test_add_entity_with_metadata(self, memory_store):
+        """add_entity accepts metadata parameter."""
+        node_id = memory_store.add_entity(
+            "login",
+            entity_type="function",
+            metadata={"file": "auth.py", "line": 10}
+        )
+
+        node = memory_store.get_node(node_id)
+        assert node.metadata["entity_type"] == "function"
+        assert node.metadata["file"] == "auth.py"
+        assert node.metadata["line"] == 10
+
+    def test_find_is_alias_for_search(self, memory_store):
+        """find() is an alias for search() with k parameter."""
+        memory_store.add_fact("Python programming language")
+        memory_store.add_fact("JavaScript programming language")
+
+        results = memory_store.find("programming", k=5)
+
+        assert len(results) == 2
+
+    def test_find_with_node_type_filter(self, memory_store):
+        """find() accepts node_type filter."""
+        memory_store.add_fact("Python fact")
+        memory_store.add_experience("Python experience", outcome="success")
+
+        results = memory_store.find("Python", k=10, node_type="fact")
+
+        assert len(results) == 1
+        assert results[0].node_type == "fact"
+
+    def test_find_with_min_confidence(self, memory_store):
+        """find() accepts min_confidence filter."""
+        memory_store.add_fact("High confidence", confidence=0.9)
+        memory_store.add_fact("Low confidence", confidence=0.5)
+
+        results = memory_store.find("confidence", k=10, min_confidence=0.8)
+
+        assert len(results) == 1
+        assert "High" in results[0].content
