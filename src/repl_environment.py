@@ -1233,6 +1233,52 @@ class RLMEnvironment:
         """Get execution history for debugging."""
         return self.history.copy()
 
+    def get_state(self) -> dict[str, Any]:
+        """
+        Get serializable state for checkpointing.
+
+        Implements: SPEC-12.10 Error Recovery (checkpoint support)
+
+        Returns:
+            Dictionary containing:
+            - working_memory: Current working memory contents
+            - locals: Local variable names (not values, for security)
+            - history_length: Number of executed commands
+        """
+        import copy as copy_module
+
+        return {
+            "working_memory": copy_module.deepcopy(
+                self.globals.get("working_memory", {})
+            ),
+            "locals": list(self.locals.keys()),
+            "history_length": len(self.history),
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore state from a checkpoint.
+
+        Implements: SPEC-12.10 Error Recovery (checkpoint support)
+
+        Args:
+            state: State dictionary from get_state()
+
+        Note:
+            This restores working_memory but clears locals for security.
+            The execution history is not modified.
+        """
+        import copy as copy_module
+
+        # Restore working memory
+        if "working_memory" in state:
+            self.globals["working_memory"] = copy_module.deepcopy(
+                state["working_memory"]
+            )
+
+        # Clear locals (can't safely restore arbitrary objects)
+        self.locals.clear()
+
 
 async def typecheck_snippet(code: str, timeout: float = 30.0) -> dict[str, Any]:
     """

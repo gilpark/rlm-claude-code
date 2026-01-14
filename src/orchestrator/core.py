@@ -8,19 +8,67 @@ Contains:
 - Turn processing loop
 - Event emission
 - Auto-memory integration
+- Error recovery strategies (SPEC-12.10)
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from ..api_client import ClaudeClient, Provider, init_client
 from ..memory_store import MemoryStore
+
+
+# ============================================================================
+# Error Recovery (SPEC-12.10)
+# ============================================================================
+
+
+class ErrorRecoveryStrategy(Enum):
+    """Strategies for recovering from errors during RLM execution."""
+
+    RETRY_SIMPLIFIED = "retry_simplified"  # Ask LLM to simplify failed code
+    FALLBACK_DIRECT = "fallback_direct"  # Fall back to direct response
+    CHECKPOINT_RECOVERY = "checkpoint"  # Retry from last good checkpoint
+    GRACEFUL_DEGRADATION = "graceful"  # Return partial results
+
+
+@dataclass
+class ErrorRecoveryConfig:
+    """Configuration for error recovery behavior."""
+
+    enabled: bool = True
+    max_retries: int = 2
+    strategies: list[ErrorRecoveryStrategy] = field(
+        default_factory=lambda: [
+            ErrorRecoveryStrategy.RETRY_SIMPLIFIED,
+            ErrorRecoveryStrategy.GRACEFUL_DEGRADATION,
+        ]
+    )
+    checkpoint_interval: int = 3  # Save checkpoint every N successful turns
+
+
+@dataclass
+class Checkpoint:
+    """Snapshot of orchestration state for recovery."""
+
+    turn: int
+    messages: list[dict[str, str]]
+    partial_results: list[str]
+    repl_state: dict[str, Any]
+
+
+# ============================================================================
+# Core Imports
+# ============================================================================
+
 from ..complexity_classifier import should_activate_rlm
 from ..config import RLMConfig, default_config
 from ..context_manager import externalize_context
@@ -52,6 +100,11 @@ class OrchestrationState:
     messages: list[dict[str, str]] = field(default_factory=list)
     final_answer: str | None = None
     error: str | None = None
+    # Error recovery tracking
+    retry_count: int = 0
+    checkpoints: list[Checkpoint] = field(default_factory=list)
+    partial_results: list[str] = field(default_factory=list)
+    recovered_from_error: bool = False
 
 
 class RLMOrchestrator:
@@ -68,6 +121,7 @@ class RLMOrchestrator:
         smart_routing: bool = True,
         memory_store: MemoryStore | None = None,
         auto_memory: bool = True,
+        error_recovery: ErrorRecoveryConfig | None = None,
     ):
         """
         Initialize orchestrator.
@@ -78,6 +132,7 @@ class RLMOrchestrator:
             smart_routing: Enable intelligent model routing based on query type
             memory_store: Optional memory store for auto-memory integration
             auto_memory: If True and memory_store provided, auto-store findings
+            error_recovery: Configuration for error recovery strategies
         """
         self.config = config or default_config
         self.client = client
@@ -87,6 +142,7 @@ class RLMOrchestrator:
         self._router: SmartRouter | None = None
         self._memory_store = memory_store
         self._auto_memory = auto_memory
+        self._error_recovery = error_recovery or ErrorRecoveryConfig()
 
     def _ensure_client(self) -> ClaudeClient:
         """Ensure we have an API client."""
@@ -657,8 +713,256 @@ class RLMOrchestrator:
 
         return facts[:10]  # Cap at 10 candidates
 
+    # =========================================================================
+    # Error Recovery Methods (SPEC-12.10)
+    # =========================================================================
+
+    def _save_checkpoint(
+        self,
+        state: OrchestrationState,
+        repl: RLMEnvironment,
+    ) -> Checkpoint:
+        """
+        Save a checkpoint of the current orchestration state.
+
+        Args:
+            state: Current orchestration state
+            repl: REPL environment
+
+        Returns:
+            Checkpoint containing state snapshot
+        """
+        checkpoint = Checkpoint(
+            turn=state.turn,
+            messages=copy.deepcopy(state.messages),
+            partial_results=list(state.partial_results),
+            repl_state=copy.deepcopy(repl.get_state()),
+        )
+        state.checkpoints.append(checkpoint)
+
+        # Keep only last 3 checkpoints to limit memory
+        if len(state.checkpoints) > 3:
+            state.checkpoints = state.checkpoints[-3:]
+
+        return checkpoint
+
+    def _restore_checkpoint(
+        self,
+        state: OrchestrationState,
+        repl: RLMEnvironment,
+        checkpoint: Checkpoint,
+    ) -> None:
+        """
+        Restore state from a checkpoint.
+
+        Args:
+            state: Current orchestration state to restore into
+            repl: REPL environment to restore
+            checkpoint: Checkpoint to restore from
+        """
+        state.turn = checkpoint.turn
+        state.messages = copy.deepcopy(checkpoint.messages)
+        state.partial_results = list(checkpoint.partial_results)
+        repl.restore_state(checkpoint.repl_state)
+        state.recovered_from_error = True
+
+    async def _attempt_error_recovery(
+        self,
+        error: Exception,
+        state: OrchestrationState,
+        repl: RLMEnvironment,
+        client: ClaudeClient,
+        trajectory: StreamingTrajectory,
+        failed_code: str | None = None,
+    ) -> AsyncIterator[TrajectoryEvent]:
+        """
+        Attempt to recover from an error using configured strategies.
+
+        Implements: SPEC-12.10 Error Recovery Strategies
+
+        Tries each configured strategy in order:
+        1. RETRY_SIMPLIFIED: Ask LLM to simplify failed code
+        2. CHECKPOINT_RECOVERY: Restore from last good checkpoint
+        3. GRACEFUL_DEGRADATION: Return partial results
+        4. FALLBACK_DIRECT: Fall back to direct (non-RLM) response
+
+        Args:
+            error: The exception that occurred
+            state: Current orchestration state
+            repl: REPL environment
+            client: API client for LLM calls
+            trajectory: Trajectory for event emission
+            failed_code: The code that failed (for RETRY_SIMPLIFIED)
+
+        Yields:
+            TrajectoryEvents describing recovery attempts
+        """
+        if not self._error_recovery.enabled:
+            return
+
+        if state.retry_count >= self._error_recovery.max_retries:
+            event = TrajectoryEvent(
+                type=TrajectoryEventType.ERROR,
+                depth=state.depth,
+                content=f"Max retries ({self._error_recovery.max_retries}) exceeded",
+                metadata={"error": str(error), "recovery": "exhausted"},
+            )
+            await trajectory.emit(event)
+            yield event
+            return
+
+        state.retry_count += 1
+        error_str = str(error)
+
+        for strategy in self._error_recovery.strategies:
+            event = TrajectoryEvent(
+                type=TrajectoryEventType.REASON,
+                depth=state.depth,
+                content=f"Attempting recovery: {strategy.value}",
+                metadata={"strategy": strategy.value, "retry": state.retry_count},
+            )
+            await trajectory.emit(event)
+            yield event
+
+            if strategy == ErrorRecoveryStrategy.RETRY_SIMPLIFIED and failed_code:
+                # Ask LLM to simplify the failed code
+                async for ev in self._recovery_retry_simplified(
+                    failed_code, error_str, state, client, trajectory
+                ):
+                    yield ev
+                if state.error is None:  # Recovery succeeded
+                    return
+
+            elif strategy == ErrorRecoveryStrategy.CHECKPOINT_RECOVERY:
+                # Restore from last checkpoint
+                if state.checkpoints:
+                    checkpoint = state.checkpoints[-1]
+                    self._restore_checkpoint(state, repl, checkpoint)
+                    event = TrajectoryEvent(
+                        type=TrajectoryEventType.REASON,
+                        depth=state.depth,
+                        content=f"Restored from checkpoint at turn {checkpoint.turn}",
+                        metadata={"checkpoint_turn": checkpoint.turn},
+                    )
+                    await trajectory.emit(event)
+                    yield event
+                    state.error = None  # Clear error, retry from checkpoint
+                    return
+
+            elif strategy == ErrorRecoveryStrategy.GRACEFUL_DEGRADATION:
+                # Return partial results with warning
+                if state.partial_results:
+                    partial_answer = (
+                        "[Partial results due to error]\n\n"
+                        + "\n".join(state.partial_results)
+                        + f"\n\n[Error: {error_str[:200]}]"
+                    )
+                    state.final_answer = partial_answer
+                    state.error = None  # Clear error, using partial results
+                    event = TrajectoryEvent(
+                        type=TrajectoryEventType.FINAL,
+                        depth=state.depth,
+                        content="Returning partial results (graceful degradation)",
+                        metadata={"partial_count": len(state.partial_results)},
+                    )
+                    await trajectory.emit(event)
+                    yield event
+                    return
+
+            elif strategy == ErrorRecoveryStrategy.FALLBACK_DIRECT:
+                # Fall back to direct response mode
+                state.final_answer = (
+                    "[RLM encountered an error, falling back to direct response]\n\n"
+                    f"Error: {error_str[:200]}\n\n"
+                    "Please try asking your question again, or rephrase it."
+                )
+                state.error = None
+                event = TrajectoryEvent(
+                    type=TrajectoryEventType.FINAL,
+                    depth=state.depth,
+                    content="Fallback to direct response",
+                    metadata={"reason": "error_recovery"},
+                )
+                await trajectory.emit(event)
+                yield event
+                return
+
+    async def _recovery_retry_simplified(
+        self,
+        failed_code: str,
+        error: str,
+        state: OrchestrationState,
+        client: ClaudeClient,
+        trajectory: StreamingTrajectory,
+    ) -> AsyncIterator[TrajectoryEvent]:
+        """
+        Attempt recovery by asking LLM to simplify the failed code.
+
+        Args:
+            failed_code: The code that failed
+            error: The error message
+            state: Current orchestration state
+            client: API client
+            trajectory: Trajectory for events
+
+        Yields:
+            TrajectoryEvents for the simplification attempt
+        """
+        simplify_prompt = f"""The following Python code failed with an error:
+
+```python
+{failed_code[:1000]}
+```
+
+Error: {error[:500]}
+
+Please provide a simpler version of this code that:
+1. Avoids the error
+2. Still accomplishes the same goal
+3. Uses only basic operations
+
+Respond with just the simplified code in a ```python block."""
+
+        try:
+            response = await client.complete(
+                messages=[{"role": "user", "content": simplify_prompt}],
+                system="You are a helpful assistant that simplifies code to avoid errors.",
+                max_tokens=1024,
+                component=CostComponent.ROOT_PROMPT,
+            )
+
+            event = TrajectoryEvent(
+                type=TrajectoryEventType.REASON,
+                depth=state.depth,
+                content=f"LLM suggested simplified code ({len(response.content)} chars)",
+                metadata={"simplification": "received"},
+            )
+            await trajectory.emit(event)
+            yield event
+
+            # Add the simplified code suggestion to messages for next iteration
+            state.messages.append(
+                {
+                    "role": "user",
+                    "content": f"The previous code failed. Here's a simplified approach:\n\n{response.content}\n\nPlease try this approach or modify it as needed.",
+                }
+            )
+            state.error = None  # Clear error to continue
+
+        except Exception as e:
+            event = TrajectoryEvent(
+                type=TrajectoryEventType.ERROR,
+                depth=state.depth,
+                content=f"Simplification failed: {e}",
+            )
+            await trajectory.emit(event)
+            yield event
+
 
 __all__ = [
     "OrchestrationState",
     "RLMOrchestrator",
+    "ErrorRecoveryStrategy",
+    "ErrorRecoveryConfig",
+    "Checkpoint",
 ]
