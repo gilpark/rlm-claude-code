@@ -7,16 +7,20 @@ Contains:
 - Base RLMOrchestrator class
 - Turn processing loop
 - Event emission
+- Auto-memory integration
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..api_client import ClaudeClient, Provider, init_client
+from ..memory_store import MemoryStore
 from ..complexity_classifier import should_activate_rlm
 from ..config import RLMConfig, default_config
 from ..context_manager import externalize_context
@@ -62,6 +66,8 @@ class RLMOrchestrator:
         config: RLMConfig | None = None,
         client: ClaudeClient | None = None,
         smart_routing: bool = True,
+        memory_store: MemoryStore | None = None,
+        auto_memory: bool = True,
     ):
         """
         Initialize orchestrator.
@@ -70,6 +76,8 @@ class RLMOrchestrator:
             config: RLM configuration (uses default if None)
             client: Claude API client (creates one if None)
             smart_routing: Enable intelligent model routing based on query type
+            memory_store: Optional memory store for auto-memory integration
+            auto_memory: If True and memory_store provided, auto-store findings
         """
         self.config = config or default_config
         self.client = client
@@ -77,6 +85,8 @@ class RLMOrchestrator:
         self.parser = ResponseParser()
         self.smart_routing = smart_routing
         self._router: SmartRouter | None = None
+        self._memory_store = memory_store
+        self._auto_memory = auto_memory
 
     def _ensure_client(self) -> ClaudeClient:
         """Ensure we have an API client."""
@@ -173,6 +183,10 @@ class RLMOrchestrator:
 
         # Initialize REPL environment with recursive handler
         repl = RLMEnvironment(context, recursive_handler=recursive_handler)
+
+        # Enable memory integration if available
+        if self._memory_store is not None:
+            repl.enable_memory(self._memory_store)
 
         # Analyze context
         externalized = externalize_context(context)
@@ -372,6 +386,17 @@ class RLMOrchestrator:
         await trajectory.emit(cost_event)
         yield cost_event
 
+        # Auto-memory integration: store findings and execution experience
+        memory_metadata: dict[str, Any] = {}
+        if self._auto_memory and self._memory_store is not None and state.final_answer:
+            memory_metadata = await self._post_execution_memory_update(
+                query=query,
+                final_answer=state.final_answer,
+                trajectory=trajectory,
+                cost_metadata=cost_metadata,
+                success=state.error is None,
+            )
+
         final_event = TrajectoryEvent(
             type=TrajectoryEventType.FINAL,
             depth=0,
@@ -379,6 +404,7 @@ class RLMOrchestrator:
             metadata={
                 "turns": state.turn,
                 "cost": cost_metadata,
+                "memory": memory_metadata,
             },
         )
         await trajectory.emit(final_event)
@@ -495,6 +521,141 @@ class RLMOrchestrator:
         )
         await trajectory.emit(end_event)
         yield end_event
+
+    async def _post_execution_memory_update(
+        self,
+        query: str,
+        final_answer: str,
+        trajectory: StreamingTrajectory,
+        cost_metadata: dict[str, Any],
+        success: bool,
+    ) -> dict[str, Any]:
+        """
+        Store execution findings and experience in memory.
+
+        Implements: SPEC-12.08 Auto-Memory Integration
+
+        After RLM execution completes:
+        1. Extract key findings from the final answer
+        2. Store as facts with lower confidence (0.6) than explicit adds
+        3. Store execution experience for strategy learning
+
+        Args:
+            query: Original user query
+            final_answer: Final answer from RLM execution
+            trajectory: Execution trajectory for context
+            cost_metadata: Cost information for experience tracking
+            success: Whether execution completed without errors
+
+        Returns:
+            Metadata about what was stored in memory
+        """
+        if self._memory_store is None:
+            return {}
+
+        stored_facts: list[str] = []
+        experience_id: str | None = None
+
+        # Extract facts from final answer
+        facts = self._extract_facts_from_answer(final_answer)
+        for fact in facts[:5]:  # Limit to 5 auto-extracted facts
+            try:
+                node_id = self._memory_store.create_node(
+                    node_type="fact",
+                    content=fact,
+                    tier="task",
+                    confidence=0.6,  # Lower confidence for auto-extracted
+                    metadata={
+                        "source": "auto_extract",
+                        "query": query[:200],
+                    },
+                )
+                stored_facts.append(node_id)
+            except Exception:
+                pass  # Don't fail execution on memory errors
+
+        # Store execution experience for strategy learning
+        try:
+            experience_data = {
+                "query": query[:500],
+                "success": success,
+                "total_cost": cost_metadata.get("total_cost", 0.0),
+                "total_tokens": cost_metadata.get("total_tokens", 0),
+                "activation_reason": self.activation_reason,
+            }
+            experience_id = self._memory_store.create_node(
+                node_type="experience",
+                content=json.dumps(experience_data),
+                tier="session",
+                confidence=0.8 if success else 0.4,
+                metadata={
+                    "outcome": "success" if success else "error",
+                    "source": "rlm_execution",
+                },
+            )
+        except Exception:
+            pass  # Don't fail execution on memory errors
+
+        return {
+            "facts_stored": len(stored_facts),
+            "fact_ids": stored_facts,
+            "experience_id": experience_id,
+        }
+
+    def _extract_facts_from_answer(self, answer: str) -> list[str]:
+        """
+        Extract factual statements from an answer.
+
+        Uses simple heuristics to identify fact-like sentences:
+        - Declarative statements (not questions)
+        - Contains specific identifiers (function names, file paths)
+        - Reasonably short (under 200 chars)
+
+        Args:
+            answer: Final answer text
+
+        Returns:
+            List of extracted fact strings
+        """
+        facts: list[str] = []
+
+        # Split into sentences
+        sentences = re.split(r"[.!?\n]", answer)
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+
+            # Skip empty or too short/long
+            if len(sentence) < 20 or len(sentence) > 200:
+                continue
+
+            # Skip questions
+            if "?" in sentence:
+                continue
+
+            # Skip meta-statements about the analysis
+            meta_patterns = [
+                r"^(I |Let me|Here's|This is|Looking at|Based on)",
+                r"^(To summarize|In summary|In conclusion)",
+                r"(you should|you can|you need)",
+            ]
+            if any(re.search(p, sentence, re.IGNORECASE) for p in meta_patterns):
+                continue
+
+            # Prefer sentences with specific identifiers
+            has_identifier = bool(
+                re.search(r"[`\'\"][\w_]+[`\'\"]", sentence)  # Quoted identifiers
+                or re.search(r"\b\w+\.(py|ts|js|go|rs)\b", sentence)  # File names
+                or re.search(r"\b(function|class|method|module)\s+\w+", sentence, re.IGNORECASE)
+            )
+
+            if has_identifier:
+                facts.append(sentence)
+            elif len(facts) < 2:
+                # Take a few general statements if we don't have many specific ones
+                facts.append(sentence)
+
+        return facts[:10]  # Cap at 10 candidates
 
 
 __all__ = [
