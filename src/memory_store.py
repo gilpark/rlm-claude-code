@@ -632,18 +632,44 @@ class MemoryStore:
         weight: float = 1.0,
     ) -> str:
         """
-        Create a hyperedge connecting nodes.
+        Create a hyperedge connecting multiple nodes.
 
         Implements: Spec SPEC-02.25
 
+        This is the low-level API for creating hyperedges (edges that can connect
+        more than two nodes). For simple two-node relationships, use the `link()`
+        convenience method instead.
+
         Args:
-            edge_type: Type of edge (relation, composition, causation, context)
-            label: Edge label
-            members: List of dicts with node_id, role, and optional position
-            weight: Edge weight (>= 0.0)
+            edge_type: Type of edge. Valid types:
+                - "relation": General relationship between nodes
+                - "composition": Part-whole relationships
+                - "causation": Cause-effect relationships
+                - "context": Contextual associations
+            label: Semantic label for the edge (e.g., "supports", "implements")
+            members: List of member dicts, each with:
+                - node_id (str): The node ID
+                - role (str): Role in the relationship (subject, object, context, etc.)
+                - position (int, optional): Order in the edge
+            weight: Edge weight >= 0.0 (default 1.0)
 
         Returns:
-            Edge ID (UUID)
+            Edge ID (UUID string)
+
+        Example:
+            >>> # For simple two-node edges, prefer link():
+            >>> store.link(fact_id, decision_id, "supports")
+            >>>
+            >>> # For multi-node hyperedges, use create_edge():
+            >>> store.create_edge(
+            ...     edge_type="causation",
+            ...     label="caused_by",
+            ...     members=[
+            ...         {"node_id": effect_id, "role": "effect"},
+            ...         {"node_id": cause1_id, "role": "cause"},
+            ...         {"node_id": cause2_id, "role": "cause"},
+            ...     ]
+            ... )
         """
         # Validate edge type
         if edge_type not in self.VALID_EDGE_TYPES:
@@ -755,6 +781,190 @@ class MemoryStore:
             cursor = conn.execute("DELETE FROM hyperedges WHERE id = ?", (edge_id,))
             conn.commit()
             return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    # =========================================================================
+    # Convenience Methods for Two-Node Relationships
+    # =========================================================================
+
+    def link(
+        self,
+        source_id: str,
+        target_id: str,
+        label: str,
+        edge_type: str = "relation",
+        weight: float = 1.0,
+    ) -> str:
+        """
+        Create a simple two-node edge (convenience method).
+
+        This is the recommended way to create relationships between two nodes.
+        For hyperedges connecting 3+ nodes, use `create_edge()` instead.
+
+        Args:
+            source_id: Source node ID (the "from" node)
+            target_id: Target node ID (the "to" node)
+            label: Semantic label describing the relationship. Common labels:
+                - "supports", "contradicts" (evidence relationships)
+                - "implements", "extends" (code relationships)
+                - "causes", "blocks" (causal relationships)
+                - "related_to", "similar_to" (general associations)
+            edge_type: Edge type (default "relation"). Valid types:
+                - "relation": General relationships (default)
+                - "composition": Part-whole (source is part of target)
+                - "causation": Cause-effect (source causes target)
+                - "context": Contextual association
+            weight: Edge weight 0.0-1.0 (default 1.0)
+
+        Returns:
+            Edge ID (UUID string)
+
+        Example:
+            >>> store = MemoryStore(":memory:")
+            >>> fact_id = store.create_node("fact", "Auth uses JWT")
+            >>> decision_id = store.create_node("decision", "Use refresh tokens")
+            >>> edge_id = store.link(fact_id, decision_id, "supports")
+            >>>
+            >>> # With explicit edge type
+            >>> store.link(cause_id, effect_id, "triggers", edge_type="causation")
+        """
+        return self.create_edge(
+            edge_type=edge_type,
+            label=label,
+            members=[
+                {"node_id": source_id, "role": "subject", "position": 0},
+                {"node_id": target_id, "role": "object", "position": 1},
+            ],
+            weight=weight,
+        )
+
+    def unlink(
+        self,
+        source_id: str,
+        target_id: str,
+        label: str | None = None,
+    ) -> int:
+        """
+        Remove edges between two nodes.
+
+        Args:
+            source_id: Source node ID
+            target_id: Target node ID
+            label: Optional label filter. If None, removes all edges between the nodes.
+
+        Returns:
+            Number of edges removed
+
+        Example:
+            >>> store.unlink(fact_id, decision_id, "supports")  # Remove specific edge
+            >>> store.unlink(node1, node2)  # Remove all edges between nodes
+        """
+        conn = self._get_connection()
+        try:
+            # Find edges where source is subject and target is object
+            if label:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT h.id FROM hyperedges h
+                    JOIN membership m1 ON h.id = m1.hyperedge_id
+                    JOIN membership m2 ON h.id = m2.hyperedge_id
+                    WHERE m1.node_id = ? AND m1.role = 'subject'
+                    AND m2.node_id = ? AND m2.role = 'object'
+                    AND h.label = ?
+                    """,
+                    (source_id, target_id, label),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT DISTINCT h.id FROM hyperedges h
+                    JOIN membership m1 ON h.id = m1.hyperedge_id
+                    JOIN membership m2 ON h.id = m2.hyperedge_id
+                    WHERE m1.node_id = ? AND m1.role = 'subject'
+                    AND m2.node_id = ? AND m2.role = 'object'
+                    """,
+                    (source_id, target_id),
+                )
+
+            edge_ids = [row[0] for row in cursor.fetchall()]
+
+            # Delete the edges
+            for edge_id in edge_ids:
+                conn.execute("DELETE FROM hyperedges WHERE id = ?", (edge_id,))
+
+            conn.commit()
+            return len(edge_ids)
+        finally:
+            conn.close()
+
+    def get_links(
+        self,
+        node_id: str,
+        direction: str = "both",
+        label: str | None = None,
+    ) -> list[tuple[str, str, str, float]]:
+        """
+        Get all links for a node.
+
+        Args:
+            node_id: Node ID to get links for
+            direction: "outgoing" (node is source), "incoming" (node is target),
+                      or "both" (default)
+            label: Optional label filter
+
+        Returns:
+            List of (edge_id, other_node_id, label, weight) tuples
+
+        Example:
+            >>> links = store.get_links(fact_id, direction="outgoing")
+            >>> for edge_id, target_id, label, weight in links:
+            ...     print(f"{label} -> {target_id}")
+        """
+        conn = self._get_connection()
+        try:
+            results = []
+
+            if direction in ("outgoing", "both"):
+                # Node is subject, find objects
+                query = """
+                    SELECT h.id, m2.node_id, h.label, h.weight
+                    FROM hyperedges h
+                    JOIN membership m1 ON h.id = m1.hyperedge_id
+                    JOIN membership m2 ON h.id = m2.hyperedge_id
+                    WHERE m1.node_id = ? AND m1.role = 'subject'
+                    AND m2.role = 'object'
+                """
+                params: list[Any] = [node_id]
+                if label:
+                    query += " AND h.label = ?"
+                    params.append(label)
+
+                cursor = conn.execute(query, params)
+                for row in cursor.fetchall():
+                    results.append((row[0], row[1], row[2], row[3]))
+
+            if direction in ("incoming", "both"):
+                # Node is object, find subjects
+                query = """
+                    SELECT h.id, m1.node_id, h.label, h.weight
+                    FROM hyperedges h
+                    JOIN membership m1 ON h.id = m1.hyperedge_id
+                    JOIN membership m2 ON h.id = m2.hyperedge_id
+                    WHERE m2.node_id = ? AND m2.role = 'object'
+                    AND m1.role = 'subject'
+                """
+                params = [node_id]
+                if label:
+                    query += " AND h.label = ?"
+                    params.append(label)
+
+                cursor = conn.execute(query, params)
+                for row in cursor.fetchall():
+                    # For incoming, the "other" node is the subject
+                    results.append((row[0], row[1], row[2], row[3]))
+
+            return results
         finally:
             conn.close()
 

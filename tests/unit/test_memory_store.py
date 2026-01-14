@@ -1189,6 +1189,145 @@ class TestEvidenceQueries:
 
 
 # =============================================================================
+# Convenience Methods (link/unlink/get_links)
+# =============================================================================
+
+
+class TestLinkConvenienceMethods:
+    """Tests for link(), unlink(), and get_links() convenience methods."""
+
+    def test_link_creates_edge(self, memory_store):
+        """link() creates a two-node edge."""
+        fact_id = memory_store.create_node("fact", "Auth uses JWT")
+        decision_id = memory_store.create_node("decision", "Use refresh tokens")
+
+        edge_id = memory_store.link(fact_id, decision_id, "supports")
+
+        assert edge_id is not None
+        edge = memory_store.get_edge(edge_id)
+        assert edge.label == "supports"
+        assert edge.type == "relation"  # Default type
+
+    def test_link_with_custom_edge_type(self, memory_store):
+        """link() accepts custom edge type."""
+        cause_id = memory_store.create_node("fact", "Memory leak")
+        effect_id = memory_store.create_node("fact", "OOM crash")
+
+        edge_id = memory_store.link(cause_id, effect_id, "causes", edge_type="causation")
+
+        edge = memory_store.get_edge(edge_id)
+        assert edge.type == "causation"
+        assert edge.label == "causes"
+
+    def test_link_with_weight(self, memory_store):
+        """link() accepts weight parameter."""
+        n1 = memory_store.create_node("fact", "Fact 1")
+        n2 = memory_store.create_node("fact", "Fact 2")
+
+        edge_id = memory_store.link(n1, n2, "related_to", weight=0.5)
+
+        edge = memory_store.get_edge(edge_id)
+        assert edge.weight == 0.5
+
+    def test_unlink_removes_edge(self, memory_store):
+        """unlink() removes edges between nodes."""
+        n1 = memory_store.create_node("fact", "Node 1")
+        n2 = memory_store.create_node("fact", "Node 2")
+        memory_store.link(n1, n2, "supports")
+
+        removed = memory_store.unlink(n1, n2, "supports")
+
+        assert removed == 1
+        # Verify no more links
+        links = memory_store.get_links(n1, direction="outgoing")
+        assert len(links) == 0
+
+    def test_unlink_with_label_filter(self, memory_store):
+        """unlink() with label only removes matching edges."""
+        n1 = memory_store.create_node("fact", "Node 1")
+        n2 = memory_store.create_node("fact", "Node 2")
+        memory_store.link(n1, n2, "supports")
+        memory_store.link(n1, n2, "contradicts")
+
+        removed = memory_store.unlink(n1, n2, "supports")
+
+        assert removed == 1
+        # "contradicts" edge should still exist
+        links = memory_store.get_links(n1, direction="outgoing")
+        assert len(links) == 1
+        assert links[0][2] == "contradicts"
+
+    def test_unlink_without_label_removes_all(self, memory_store):
+        """unlink() without label removes all edges between nodes."""
+        n1 = memory_store.create_node("fact", "Node 1")
+        n2 = memory_store.create_node("fact", "Node 2")
+        memory_store.link(n1, n2, "supports")
+        memory_store.link(n1, n2, "contradicts")
+
+        removed = memory_store.unlink(n1, n2)
+
+        assert removed == 2
+        links = memory_store.get_links(n1)
+        assert len(links) == 0
+
+    def test_get_links_outgoing(self, memory_store):
+        """get_links() returns outgoing links."""
+        n1 = memory_store.create_node("fact", "Source")
+        n2 = memory_store.create_node("fact", "Target 1")
+        n3 = memory_store.create_node("fact", "Target 2")
+        memory_store.link(n1, n2, "supports")
+        memory_store.link(n1, n3, "contradicts")
+
+        links = memory_store.get_links(n1, direction="outgoing")
+
+        assert len(links) == 2
+        target_ids = [link[1] for link in links]
+        assert n2 in target_ids
+        assert n3 in target_ids
+
+    def test_get_links_incoming(self, memory_store):
+        """get_links() returns incoming links."""
+        n1 = memory_store.create_node("fact", "Source 1")
+        n2 = memory_store.create_node("fact", "Source 2")
+        n3 = memory_store.create_node("fact", "Target")
+        memory_store.link(n1, n3, "supports")
+        memory_store.link(n2, n3, "supports")
+
+        links = memory_store.get_links(n3, direction="incoming")
+
+        assert len(links) == 2
+        source_ids = [link[1] for link in links]
+        assert n1 in source_ids
+        assert n2 in source_ids
+
+    def test_get_links_with_label_filter(self, memory_store):
+        """get_links() filters by label."""
+        n1 = memory_store.create_node("fact", "Source")
+        n2 = memory_store.create_node("fact", "Target 1")
+        n3 = memory_store.create_node("fact", "Target 2")
+        memory_store.link(n1, n2, "supports")
+        memory_store.link(n1, n3, "contradicts")
+
+        links = memory_store.get_links(n1, label="supports")
+
+        assert len(links) == 1
+        assert links[0][1] == n2
+        assert links[0][2] == "supports"
+
+    def test_get_links_both_directions(self, memory_store):
+        """get_links() with direction='both' returns all links."""
+        n1 = memory_store.create_node("fact", "Node 1")
+        n2 = memory_store.create_node("fact", "Node 2")
+        n3 = memory_store.create_node("fact", "Node 3")
+        memory_store.link(n1, n2, "supports")  # n1 -> n2
+        memory_store.link(n3, n1, "contradicts")  # n3 -> n1
+
+        links = memory_store.get_links(n1, direction="both")
+
+        assert len(links) == 2
+
+
+# =============================================================================
 # Confidence Update Logging (Phase 3: Memory Integration)
 # =============================================================================
 
