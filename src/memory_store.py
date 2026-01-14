@@ -1421,14 +1421,15 @@ class MemoryStore:
         conn = self._get_connection()
         try:
             # Build query with optional filters
-            # BM25 scoring: lower is better, so we negate for DESC ordering
+            # BM25 scoring: SQLite returns negative values (more negative = better match)
+            # We negate the score so users see positive values (higher = better)
             # Always join with nodes table to exclude archived nodes (soft-deleted)
             base_query = """
                 SELECT
                     f.node_id,
                     f.content,
                     f.type,
-                    bm25(content_fts) as score,
+                    -bm25(content_fts) as score,
                     snippet(content_fts, 1, '<b>', '</b>', '...', 32) as snippet
                 FROM content_fts f
                 JOIN nodes n ON f.node_id = n.id
@@ -1450,7 +1451,8 @@ class MemoryStore:
             if conditions:
                 base_query += " AND " + " AND ".join(conditions)
 
-            base_query += " ORDER BY score LIMIT ?"
+            # Higher score = better match (after negation), so order descending
+            base_query += " ORDER BY score DESC LIMIT ?"
             params.append(limit)
 
             cursor = conn.execute(base_query, params)

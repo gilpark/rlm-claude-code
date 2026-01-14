@@ -1455,6 +1455,31 @@ class TestFTS5Search:
         assert results[0].bm25_score is not None
         assert isinstance(results[0].bm25_score, float)
 
+    def test_search_bm25_score_is_positive(self, memory_store):
+        """BM25 scores should be positive (higher = better match)."""
+        memory_store.create_node("fact", "Python programming language is versatile")
+
+        results = memory_store.search("Python")
+
+        assert len(results) == 1
+        assert results[0].bm25_score > 0, "BM25 scores should be positive"
+
+    def test_search_ranking_by_relevance(self, memory_store):
+        """Better matches should have higher BM25 scores."""
+        # Create nodes with different term frequencies
+        memory_store.create_node("fact", "Python Python Python is great")  # 3x Python
+        memory_store.create_node("fact", "Python is a language")  # 1x Python
+        memory_store.create_node("fact", "Java is also a language")  # 0x Python
+
+        results = memory_store.search("Python")
+
+        # Should only match the two Python documents
+        assert len(results) == 2
+        # The one with more "Python" mentions should rank higher (higher score)
+        assert results[0].bm25_score >= results[1].bm25_score
+        # First result should have the most mentions
+        assert "Python Python Python" in results[0].content
+
     def test_search_result_has_snippet(self, memory_store):
         """Search results include highlighted snippet."""
         memory_store.create_node("fact", "Python is a great programming language for beginners")
