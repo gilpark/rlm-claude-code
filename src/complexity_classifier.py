@@ -117,6 +117,33 @@ def extract_complexity_signals(prompt: str, context: SessionContext) -> TaskComp
         r"\b(debug\w*|diagnos\w*|investigat\w*|troubleshoot\w*)\b",
     ]
 
+    # Exhaustive search indicators - need systematic enumeration
+    exhaustive_patterns = [
+        r"\b(find|list|show|get)\s+(all|every)\b",
+        r"\b(ensure|check|verify)\s+(all|every|each)\b",
+        r"\b(comprehensive|exhaustive|complete)\s+(list|search|scan|review)\b",
+        r"\ball\s+(the\s+)?(places|instances|usages|occurrences|references)\b",
+    ]
+
+    # User intent: thorough mode signals
+    thorough_patterns = [
+        r"\bmake\s+sure\b",
+        r"\bbe\s+careful\b",
+        r"\b(thorough|thoroughly)\b",
+        r"\bdon'?t\s+miss\b",
+        r"\bcheck\s+everything\b",
+        r"\b(verify|validate|confirm)\s+(all|every|each)\b",
+        r"\b(important|critical|crucial)\b",
+    ]
+
+    # User intent: fast mode signals
+    fast_patterns = [
+        r"\b(quick|quickly)\b",
+        r"\bjust\s+(show|tell|give)\b",
+        r"\bbriefly\b",
+        r"\bsimple\s+(answer|explanation)\b",
+    ]
+
     return TaskComplexitySignals(
         references_multiple_files=references_multiple,
         requires_cross_context_reasoning=any(
@@ -125,6 +152,9 @@ def extract_complexity_signals(prompt: str, context: SessionContext) -> TaskComp
         involves_temporal_reasoning=any(re.search(p, prompt_lower) for p in temporal_patterns),
         asks_about_patterns=any(re.search(p, prompt_lower) for p in pattern_patterns),
         debugging_task=any(re.search(p, prompt_lower) for p in debug_patterns),
+        requires_exhaustive_search=any(re.search(p, prompt_lower) for p in exhaustive_patterns),
+        user_wants_thorough=any(re.search(p, prompt_lower) for p in thorough_patterns),
+        user_wants_fast=any(re.search(p, prompt_lower) for p in fast_patterns),
         context_has_multiple_domains=len(context.active_modules) > 2,
         recent_tool_outputs_large=sum(len(o.content) for o in context.tool_outputs[-5:]) > 10000,
         conversation_has_state_changes=_detect_state_changes(context),
@@ -167,6 +197,9 @@ def should_activate_rlm(
     if signals.debugging_task:
         # Debugging is complex even without large outputs - need to trace causes
         return True, "debugging_task"
+    if signals.requires_exhaustive_search:
+        # Exhaustive searches need systematic REPL-based enumeration
+        return True, "exhaustive_search"
     if signals.references_multiple_files and signals.files_span_multiple_modules:
         return True, "multi_module_task"
 
@@ -192,6 +225,9 @@ def should_activate_rlm(
     if signals.task_is_continuation:
         score += 1
         reasons.append("continuation")
+    if signals.user_wants_thorough:
+        score += 2  # User explicitly wants careful analysis
+        reasons.append("user_thorough")
 
     # Token count as tiebreaker
     if context.total_tokens > 80000:

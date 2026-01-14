@@ -88,6 +88,11 @@ class TaskComplexitySignals(BaseModel):
     involves_temporal_reasoning: bool = False
     asks_about_patterns: bool = False
     debugging_task: bool = False
+    requires_exhaustive_search: bool = False  # "find all", "list every", etc.
+
+    # User intent signals
+    user_wants_thorough: bool = False  # "make sure", "be careful", "thorough"
+    user_wants_fast: bool = False  # "quick", "just", "briefly"
 
     # Context analysis
     context_has_multiple_domains: bool = False

@@ -62,6 +62,46 @@ class TestExtractComplexitySignals:
         assert signals.requires_cross_context_reasoning is False
         assert signals.debugging_task is False
 
+    def test_detects_exhaustive_search(self, mock_context):
+        """'Find all' and similar patterns trigger requires_exhaustive_search."""
+        prompts = [
+            "Find all API endpoints in the codebase",
+            "List every error handler",
+            "Show all occurrences of this pattern",
+            "comprehensive review of the module",
+        ]
+
+        for prompt in prompts:
+            signals = extract_complexity_signals(prompt, mock_context)
+            assert signals.requires_exhaustive_search is True, f"Failed for: {prompt}"
+
+    def test_detects_user_wants_thorough(self, mock_context):
+        """Thorough intent patterns trigger user_wants_thorough."""
+        prompts = [
+            "Make sure all tests pass",
+            "Be careful with the refactoring",
+            "Do a thorough analysis",
+            "Don't miss any edge cases",
+            "This is critical - check everything",
+        ]
+
+        for prompt in prompts:
+            signals = extract_complexity_signals(prompt, mock_context)
+            assert signals.user_wants_thorough is True, f"Failed for: {prompt}"
+
+    def test_detects_user_wants_fast(self, mock_context):
+        """Fast intent patterns trigger user_wants_fast."""
+        prompts = [
+            "Quick question about the config",
+            "Just show me the file",
+            "Briefly explain this function",
+            "Give me a simple answer",
+        ]
+
+        for prompt in prompts:
+            signals = extract_complexity_signals(prompt, mock_context)
+            assert signals.user_wants_fast is True, f"Failed for: {prompt}"
+
 
 class TestShouldActivateRlm:
     """Tests for should_activate_rlm function."""
@@ -104,7 +144,8 @@ class TestShouldActivateRlm:
 
     def test_activates_on_pattern_search_alone(self, mock_context):
         """Pattern search queries should activate RLM (score=2)."""
-        prompt = "Find all places where auth is used"
+        # Use "search" without "all" to trigger pattern_search but not exhaustive_search
+        prompt = "Search for places where auth is used"
 
         should_activate, reason = should_activate_rlm(prompt, mock_context)
 
@@ -145,6 +186,33 @@ class TestShouldActivateRlm:
 
         assert should_activate is False
         assert reason == "simple_task"
+
+    def test_activates_on_exhaustive_search(self, mock_context):
+        """Exhaustive search patterns immediately activate RLM."""
+        prompt = "Find all usages of the deprecated API"
+
+        should_activate, reason = should_activate_rlm(prompt, mock_context)
+
+        assert should_activate is True
+        assert "exhaustive" in reason.lower()
+
+    def test_activates_on_user_thorough_intent(self, mock_context):
+        """User wanting thorough analysis adds to complexity score."""
+        prompt = "Make sure all the edge cases are covered"
+
+        should_activate, reason = should_activate_rlm(prompt, mock_context)
+
+        assert should_activate is True
+        assert "user_thorough" in reason
+
+    def test_user_fast_intent_does_not_prevent_activation(self, mock_context):
+        """Fast intent doesn't override complexity signals."""
+        prompt = "Quickly find all the bugs in this module"
+
+        should_activate, reason = should_activate_rlm(prompt, mock_context)
+
+        # Should still activate due to exhaustive search and debugging signals
+        assert should_activate is True
 
 
 class TestIsDefinitelySimple:
