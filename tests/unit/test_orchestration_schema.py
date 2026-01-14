@@ -8,10 +8,12 @@ import pytest
 
 from src.orchestration_schema import (
     ExecutionMode,
+    ExecutionStrategy,
     MODE_DEFAULTS,
     OrchestrationContext,
     OrchestrationPlan,
     PlanAdjustment,
+    STRATEGY_DEFAULTS,
     TIER_MODELS,
     ToolAccessLevel,
 )
@@ -386,3 +388,176 @@ class TestTierModels:
         """Powerful tier includes powerful models."""
         models = TIER_MODELS[ModelTier.POWERFUL]
         assert "opus" in models
+
+
+class TestExecutionStrategy:
+    """Tests for ExecutionStrategy enum (SPEC-12.06)."""
+
+    def test_all_strategies_exist(self):
+        """All expected execution strategies exist."""
+        assert ExecutionStrategy.DIRECT_RESPONSE
+        assert ExecutionStrategy.DISCOVERY
+        assert ExecutionStrategy.EXHAUSTIVE_SEARCH
+        assert ExecutionStrategy.RECURSIVE_DEBUG
+        assert ExecutionStrategy.MAP_REDUCE
+        assert ExecutionStrategy.ARCHITECTURE
+        assert ExecutionStrategy.CONTINUATION
+
+    def test_strategy_values(self):
+        """Strategy values are correct strings."""
+        assert ExecutionStrategy.DIRECT_RESPONSE.value == "direct"
+        assert ExecutionStrategy.DISCOVERY.value == "discovery"
+        assert ExecutionStrategy.EXHAUSTIVE_SEARCH.value == "exhaustive_search"
+        assert ExecutionStrategy.RECURSIVE_DEBUG.value == "recursive_debug"
+        assert ExecutionStrategy.MAP_REDUCE.value == "map_reduce"
+        assert ExecutionStrategy.ARCHITECTURE.value == "architecture"
+        assert ExecutionStrategy.CONTINUATION.value == "continuation"
+
+    def test_strategy_count(self):
+        """Seven strategies matching seven JTBDs."""
+        assert len(ExecutionStrategy) == 7
+
+
+class TestStrategyDefaults:
+    """Tests for STRATEGY_DEFAULTS configuration."""
+
+    def test_all_strategies_have_defaults(self):
+        """All execution strategies have default configurations."""
+        for strategy in ExecutionStrategy:
+            assert strategy in STRATEGY_DEFAULTS
+            defaults = STRATEGY_DEFAULTS[strategy]
+            assert "activate_rlm" in defaults
+            assert "depth_budget" in defaults
+            assert "model_tier" in defaults
+            assert "tool_access" in defaults
+            assert "hints" in defaults
+
+    def test_direct_response_bypasses_rlm(self):
+        """Direct response strategy bypasses RLM."""
+        defaults = STRATEGY_DEFAULTS[ExecutionStrategy.DIRECT_RESPONSE]
+        assert defaults["activate_rlm"] is False
+        assert defaults["depth_budget"] == 0
+        assert defaults["hints"] == []
+
+    def test_recursive_debug_uses_powerful_model(self):
+        """Recursive debug strategy uses powerful model with depth 3."""
+        defaults = STRATEGY_DEFAULTS[ExecutionStrategy.RECURSIVE_DEBUG]
+        assert defaults["activate_rlm"] is True
+        assert defaults["depth_budget"] == 3
+        assert defaults["model_tier"] == ModelTier.POWERFUL
+        assert len(defaults["hints"]) > 0
+
+    def test_exhaustive_search_uses_fast_model(self):
+        """Exhaustive search uses fast model for enumeration."""
+        defaults = STRATEGY_DEFAULTS[ExecutionStrategy.EXHAUSTIVE_SEARCH]
+        assert defaults["activate_rlm"] is True
+        assert defaults["model_tier"] == ModelTier.FAST
+        assert defaults["execution_mode"] == ExecutionMode.THOROUGH
+
+    def test_continuation_has_low_depth(self):
+        """Continuation strategy has low depth since memory available."""
+        defaults = STRATEGY_DEFAULTS[ExecutionStrategy.CONTINUATION]
+        assert defaults["depth_budget"] == 1
+        assert "memory_query()" in defaults["hints"][0]
+
+    def test_all_strategies_have_hints(self):
+        """All active strategies have REPL function hints."""
+        for strategy in ExecutionStrategy:
+            if strategy != ExecutionStrategy.DIRECT_RESPONSE:
+                defaults = STRATEGY_DEFAULTS[strategy]
+                assert len(defaults["hints"]) > 0
+
+
+class TestOrchestrationPlanFromStrategy:
+    """Tests for OrchestrationPlan.from_strategy() method."""
+
+    def test_from_strategy_direct_response(self):
+        """Direct response strategy creates bypass plan."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.DIRECT_RESPONSE,
+            activation_reason="simple_query",
+        )
+
+        assert plan.activate_rlm is False
+        assert plan.strategy == ExecutionStrategy.DIRECT_RESPONSE
+        assert plan.strategy_hints == []
+        assert plan.depth_budget == 0
+
+    def test_from_strategy_discovery(self):
+        """Discovery strategy creates balanced plan."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.DISCOVERY,
+            activation_reason="explore_codebase",
+        )
+
+        assert plan.activate_rlm is True
+        assert plan.strategy == ExecutionStrategy.DISCOVERY
+        assert plan.depth_budget == 2
+        assert plan.model_tier == ModelTier.BALANCED
+        assert len(plan.strategy_hints) > 0
+        assert "peek()" in plan.strategy_hints[0]
+
+    def test_from_strategy_recursive_debug(self):
+        """Recursive debug strategy creates thorough plan."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.RECURSIVE_DEBUG,
+            activation_reason="multi_layer_error",
+        )
+
+        assert plan.activate_rlm is True
+        assert plan.strategy == ExecutionStrategy.RECURSIVE_DEBUG
+        assert plan.depth_budget == 3
+        assert plan.model_tier == ModelTier.POWERFUL
+        assert plan.execution_mode == ExecutionMode.THOROUGH
+
+    def test_from_strategy_map_reduce(self):
+        """Map reduce strategy for systematic analysis."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.MAP_REDUCE,
+            activation_reason="security_review",
+        )
+
+        assert plan.activate_rlm is True
+        assert plan.strategy == ExecutionStrategy.MAP_REDUCE
+        assert "map_reduce()" in plan.strategy_hints[0]
+
+    def test_from_strategy_with_available_models(self):
+        """Strategy respects available models."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.ARCHITECTURE,
+            available_models=["sonnet", "haiku"],  # No opus
+        )
+
+        # Should fall back to sonnet since opus not available
+        assert plan.primary_model == "sonnet"
+
+    def test_from_strategy_hints_are_copied(self):
+        """Strategy hints are copied to avoid mutation."""
+        plan1 = OrchestrationPlan.from_strategy(ExecutionStrategy.DISCOVERY)
+        plan2 = OrchestrationPlan.from_strategy(ExecutionStrategy.DISCOVERY)
+
+        # Modify one plan's hints
+        plan1.strategy_hints.append("extra hint")
+
+        # Other plan should be unaffected
+        assert "extra hint" not in plan2.strategy_hints
+
+    def test_from_strategy_serialization(self):
+        """Strategy fields serialize correctly."""
+        plan = OrchestrationPlan.from_strategy(
+            ExecutionStrategy.EXHAUSTIVE_SEARCH,
+            activation_reason="find_all_usages",
+        )
+
+        data = plan.to_dict()
+
+        assert data["strategy"] == "exhaustive_search"
+        assert isinstance(data["strategy_hints"], list)
+        assert len(data["strategy_hints"]) > 0
+
+    def test_bypass_uses_direct_response_strategy(self):
+        """Bypass plan uses DIRECT_RESPONSE strategy."""
+        plan = OrchestrationPlan.bypass("simple_task")
+
+        assert plan.strategy == ExecutionStrategy.DIRECT_RESPONSE
+        assert plan.strategy_hints == []

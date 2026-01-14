@@ -46,6 +46,31 @@ class ToolAccessLevel(Enum):
     FULL = "full"  # Full Claude Code tool access
 
 
+class ExecutionStrategy(Enum):
+    """
+    Execution strategy templates mapped to user JTBDs.
+
+    Implements: SPEC-12.06 - Strategy Templates for OODA Decide Phase
+
+    Each strategy corresponds to a Job-To-Be-Done from the JTBD analysis:
+    - DIRECT_RESPONSE: Quick answers without RLM (JTBD-7)
+    - DISCOVERY: Understand unfamiliar codebase (JTBD-2)
+    - EXHAUSTIVE_SEARCH: Find all usages/instances (JTBD-3)
+    - RECURSIVE_DEBUG: Multi-layer debugging (JTBD-1)
+    - MAP_REDUCE: Security/completeness review (JTBD-5)
+    - ARCHITECTURE: Design decisions with tradeoffs (JTBD-4)
+    - CONTINUATION: Resume previous work (JTBD-6)
+    """
+
+    DIRECT_RESPONSE = "direct"  # JTBD-7: Quick answers, bypass RLM
+    DISCOVERY = "discovery"  # JTBD-2: Explore codebase structure
+    EXHAUSTIVE_SEARCH = "exhaustive_search"  # JTBD-3: Find all instances
+    RECURSIVE_DEBUG = "recursive_debug"  # JTBD-1: Multi-layer tracing
+    MAP_REDUCE = "map_reduce"  # JTBD-5: Systematic partition analysis
+    ARCHITECTURE = "architecture"  # JTBD-4: Design decision exploration
+    CONTINUATION = "continuation"  # JTBD-6: Resume with memory context
+
+
 # Default configurations per execution mode
 MODE_DEFAULTS: dict[ExecutionMode, dict[str, Any]] = {
     ExecutionMode.FAST: {
@@ -77,6 +102,97 @@ TIER_MODELS: dict[ModelTier, list[str]] = {
     ModelTier.BALANCED: ["sonnet", "gpt-4o", "o3-mini"],
     ModelTier.POWERFUL: ["opus", "gpt-5.2", "o1"],
     ModelTier.CODE_SPECIALIST: ["gpt-5.2-codex", "sonnet"],
+}
+
+# Strategy defaults based on JTBD analysis
+# Each strategy has recommended settings and REPL function hints
+STRATEGY_DEFAULTS: dict[ExecutionStrategy, dict[str, Any]] = {
+    ExecutionStrategy.DIRECT_RESPONSE: {
+        "activate_rlm": False,
+        "depth_budget": 0,
+        "model_tier": ModelTier.FAST,
+        "tool_access": ToolAccessLevel.NONE,
+        "execution_mode": ExecutionMode.FAST,
+        "hints": [],  # No REPL needed
+    },
+    ExecutionStrategy.DISCOVERY: {
+        "activate_rlm": True,
+        "depth_budget": 2,
+        "model_tier": ModelTier.BALANCED,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.BALANCED,
+        "hints": [
+            "Use peek() to scan file structure first",
+            "Use find_relevant() to identify key files",
+            "Use extract_functions() for code structure",
+            "Use llm() sub-queries for component explanations",
+        ],
+    },
+    ExecutionStrategy.EXHAUSTIVE_SEARCH: {
+        "activate_rlm": True,
+        "depth_budget": 2,
+        "model_tier": ModelTier.FAST,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.THOROUGH,
+        "hints": [
+            "Use search() with regex for pattern matching",
+            "Use llm_batch() for parallel file analysis",
+            "Use memory_add_fact() to track findings",
+            "Ensure exhaustive coverage before synthesizing",
+        ],
+    },
+    ExecutionStrategy.RECURSIVE_DEBUG: {
+        "activate_rlm": True,
+        "depth_budget": 3,
+        "model_tier": ModelTier.POWERFUL,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.THOROUGH,
+        "hints": [
+            "Use search() to trace error patterns",
+            "Use llm() sub-queries for each module layer",
+            "Use map_reduce() to synthesize findings",
+            "Trace data flow between components",
+        ],
+    },
+    ExecutionStrategy.MAP_REDUCE: {
+        "activate_rlm": True,
+        "depth_budget": 3,
+        "model_tier": ModelTier.POWERFUL,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.THOROUGH,
+        "hints": [
+            "Use map_reduce() with focused analysis prompts",
+            "Partition codebase into logical sections",
+            "Use memory_add_experience() for findings",
+            "Prioritize results by severity/impact",
+        ],
+    },
+    ExecutionStrategy.ARCHITECTURE: {
+        "activate_rlm": True,
+        "depth_budget": 3,
+        "model_tier": ModelTier.POWERFUL,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.THOROUGH,
+        "hints": [
+            "Use llm() sub-queries to analyze each option",
+            "Build reasoning traces for decision tree",
+            "Enumerate tradeoffs explicitly",
+            "Consider codebase context for recommendations",
+        ],
+    },
+    ExecutionStrategy.CONTINUATION: {
+        "activate_rlm": True,
+        "depth_budget": 1,  # Lower depth since we have memory
+        "model_tier": ModelTier.BALANCED,
+        "tool_access": ToolAccessLevel.READ_ONLY,
+        "execution_mode": ExecutionMode.BALANCED,
+        "hints": [
+            "Use memory_query() to recall prior context",
+            "Skip re-analysis of known facts",
+            "Focus on new work since last session",
+            "Update memory with new discoveries",
+        ],
+    },
 }
 
 
@@ -188,6 +304,10 @@ class OrchestrationPlan:
     memory_context: list[str] = field(default_factory=list)  # Relevant facts to inject
     prior_strategy: str | None = None  # Strategy from successful past experience
 
+    # === Strategy Templates (SPEC-12.06) ===
+    strategy: ExecutionStrategy = ExecutionStrategy.DISCOVERY  # Selected execution strategy
+    strategy_hints: list[str] = field(default_factory=list)  # REPL function hints for strategy
+
     @property
     def total_token_budget(self) -> int:
         """Total tokens allowed across all depths."""
@@ -234,6 +354,8 @@ class OrchestrationPlan:
             "metadata": self.metadata,
             "memory_context": self.memory_context,
             "prior_strategy": self.prior_strategy,
+            "strategy": self.strategy.value,
+            "strategy_hints": self.strategy_hints,
         }
 
     @classmethod
@@ -248,6 +370,87 @@ class OrchestrationPlan:
             tokens_per_depth=0,
             execution_mode=ExecutionMode.FAST,
             tool_access=ToolAccessLevel.NONE,
+            strategy=ExecutionStrategy.DIRECT_RESPONSE,
+            strategy_hints=[],
+        )
+
+    @classmethod
+    def from_strategy(
+        cls,
+        strategy: ExecutionStrategy,
+        activation_reason: str = "strategy_selected",
+        available_models: list[str] | None = None,
+        use_model_aware_budget: bool = True,
+    ) -> OrchestrationPlan:
+        """
+        Create plan from execution strategy with JTBD-aligned defaults.
+
+        Implements: SPEC-12.06 - Strategy Templates
+
+        Args:
+            strategy: Execution strategy (maps to JTBD)
+            activation_reason: Why this strategy was selected
+            available_models: Models that are available (have API keys)
+            use_model_aware_budget: If True, compute tokens_per_depth based on
+                                    model cost and budget (recommended)
+
+        Returns:
+            OrchestrationPlan configured for the strategy
+
+        Example:
+            >>> plan = OrchestrationPlan.from_strategy(
+            ...     ExecutionStrategy.RECURSIVE_DEBUG,
+            ...     activation_reason="multi_layer_error"
+            ... )
+            >>> plan.depth_budget
+            3
+            >>> plan.strategy_hints[0]
+            'Use search() to trace error patterns'
+        """
+        defaults = STRATEGY_DEFAULTS[strategy]
+        tier = defaults["model_tier"]
+        mode = defaults["execution_mode"]
+
+        # Handle direct response (no RLM)
+        if not defaults["activate_rlm"]:
+            return cls.bypass(reason=activation_reason)
+
+        # Select primary model from available models
+        tier_models = TIER_MODELS.get(tier, TIER_MODELS[ModelTier.BALANCED])
+        if available_models:
+            candidates = [m for m in tier_models if m in available_models]
+        else:
+            candidates = tier_models
+
+        primary = candidates[0] if candidates else "sonnet"
+        fallbacks = candidates[1:3] if len(candidates) > 1 else []
+
+        depth_budget = defaults["depth_budget"]
+        max_cost = MODE_DEFAULTS[mode]["max_cost_dollars"]
+
+        # Compute model-aware tokens per depth if enabled
+        if use_model_aware_budget:
+            tokens_per_depth = compute_model_aware_tokens_per_depth(
+                model=primary,
+                budget_dollars=max_cost,
+                depth_budget=depth_budget,
+            )
+        else:
+            tokens_per_depth = MODE_DEFAULTS[mode]["tokens_per_depth"]
+
+        return cls(
+            activate_rlm=True,
+            activation_reason=activation_reason,
+            model_tier=tier,
+            primary_model=primary,
+            fallback_chain=fallbacks,
+            depth_budget=depth_budget,
+            tokens_per_depth=tokens_per_depth,
+            execution_mode=mode,
+            tool_access=defaults["tool_access"],
+            max_cost_dollars=max_cost,
+            strategy=strategy,
+            strategy_hints=list(defaults["hints"]),  # Copy to avoid mutation
         )
 
     @classmethod
@@ -378,10 +581,12 @@ class PlanAdjustment:
 
 __all__ = [
     "ExecutionMode",
+    "ExecutionStrategy",
     "MODE_DEFAULTS",
     "OrchestrationContext",
     "OrchestrationPlan",
     "PlanAdjustment",
+    "STRATEGY_DEFAULTS",
     "TIER_MODELS",
     "ToolAccessLevel",
     "compute_model_aware_tokens_per_depth",

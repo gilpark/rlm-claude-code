@@ -23,8 +23,10 @@ from ..cost_tracker import CostComponent
 from ..memory_store import MemoryStore
 from ..orchestration_schema import (
     ExecutionMode,
+    ExecutionStrategy,
     OrchestrationContext,
     OrchestrationPlan,
+    STRATEGY_DEFAULTS,
     ToolAccessLevel,
 )
 from ..smart_router import ModelTier, QueryClassifier, QueryType
@@ -1050,6 +1052,38 @@ Output your decision as a JSON object."""
             tool_access = ToolAccessLevel.REPL_ONLY
             heuristics_triggered.append("tool_access:repl_only")
 
+        # === Strategy Inference (SPEC-12.06) ===
+        # Map signals to execution strategies based on JTBD analysis
+        strategy: ExecutionStrategy = ExecutionStrategy.DISCOVERY  # Default
+
+        if "debugging_deep" in high_value_signals:
+            # JTBD-1: Debug complex, multi-layer issues
+            strategy = ExecutionStrategy.RECURSIVE_DEBUG
+            heuristics_triggered.append("strategy:recursive_debug")
+        elif "architectural" in high_value_signals or "uncertainty_high" in high_value_signals:
+            # JTBD-4: Make informed architectural decisions
+            strategy = ExecutionStrategy.ARCHITECTURE
+            heuristics_triggered.append("strategy:architecture")
+        elif "pattern_exhaustion" in high_value_signals:
+            # JTBD-5: Ensure security/quality completeness
+            strategy = ExecutionStrategy.MAP_REDUCE
+            heuristics_triggered.append("strategy:map_reduce")
+        elif "synthesis_required" in high_value_signals:
+            # JTBD-3: Make comprehensive changes across codebase
+            strategy = ExecutionStrategy.EXHAUSTIVE_SEARCH
+            heuristics_triggered.append("strategy:exhaustive_search")
+        elif "discovery_required" in high_value_signals:
+            # JTBD-2: Understand unfamiliar codebase
+            strategy = ExecutionStrategy.DISCOVERY
+            heuristics_triggered.append("strategy:discovery")
+        elif context.complexity_signals.get("task_is_continuation"):
+            # JTBD-6: Resume/continue previous work
+            strategy = ExecutionStrategy.CONTINUATION
+            heuristics_triggered.append("strategy:continuation")
+
+        # Get strategy hints for the selected strategy
+        strategy_hints = list(STRATEGY_DEFAULTS[strategy]["hints"])
+
         # Determine primary reason
         if high_value_signals:
             activation_reason = high_value_signals[0]
@@ -1076,6 +1110,10 @@ Output your decision as a JSON object."""
         # Apply inferred tool access
         if tool_access is not None:
             plan.tool_access = tool_access
+
+        # Apply inferred strategy
+        plan.strategy = strategy
+        plan.strategy_hints = strategy_hints
 
         # Add all signals
         plan.complexity_score = classification.complexity
