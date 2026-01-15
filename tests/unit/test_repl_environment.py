@@ -1113,3 +1113,165 @@ op = audit_reasoning(steps, sources)
         assert op.metadata["step_count"] == 0
         assert op.metadata["steps"] == []
         assert "0 reasoning steps" in op.query
+
+
+class TestDetectHallucinationsREPL:
+    """Tests for detect_hallucinations REPL function (SPEC-16.05)."""
+
+    @pytest.fixture
+    def env(self, basic_context):
+        """Create a REPL environment."""
+        return RLMEnvironment(basic_context, use_restricted=False)
+
+    @pytest.fixture
+    def micro_env(self, basic_context):
+        """Create a micro mode environment."""
+        return create_micro_environment(basic_context, use_restricted=False)
+
+    def test_detect_hallucinations_available_in_standard_mode(self, env):
+        """SPEC-16.05: detect_hallucinations is available in standard mode."""
+        assert "detect_hallucinations" in env.globals
+        assert callable(env.globals["detect_hallucinations"])
+
+    def test_detect_hallucinations_not_available_in_micro_mode(self, micro_env):
+        """detect_hallucinations is NOT available in micro mode."""
+        assert "detect_hallucinations" not in micro_env.globals
+
+    def test_detect_hallucinations_returns_deferred_operation(self, env):
+        """detect_hallucinations returns a DeferredOperation."""
+        from src.types import DeferredOperation
+
+        op = env._detect_hallucinations(
+            response="The function returns 42.",
+            context="def func(): return 42",
+        )
+
+        assert isinstance(op, DeferredOperation)
+        assert op.operation_type == "detect_hallucinations"
+
+    def test_detect_hallucinations_with_string_context(self, env):
+        """detect_hallucinations accepts string context."""
+        op = env._detect_hallucinations(
+            response="X is Y.",
+            context="X equals Y in all cases.",
+        )
+
+        assert "X equals Y" in op.context
+        assert op.metadata["context_sources"] == {"main": "X equals Y in all cases."}
+
+    def test_detect_hallucinations_with_dict_context(self, env):
+        """detect_hallucinations accepts dict context and formats it."""
+        op = env._detect_hallucinations(
+            response="The module has functions.",
+            context={
+                "main.py": "def main(): pass",
+                "utils.py": "def helper(): pass",
+            },
+        )
+
+        assert "[main.py]" in op.context
+        assert "[utils.py]" in op.context
+        assert "def main" in op.context
+        assert op.metadata["context_sources"]["main.py"] == "def main(): pass"
+
+    def test_detect_hallucinations_stores_response_in_metadata(self, env):
+        """detect_hallucinations stores the response in metadata."""
+        response = "This is the response to check."
+        op = env._detect_hallucinations(
+            response=response,
+            context="Some context",
+        )
+
+        assert op.metadata["response"] == response
+
+    def test_detect_hallucinations_stores_thresholds_in_metadata(self, env):
+        """detect_hallucinations stores thresholds in metadata."""
+        op = env._detect_hallucinations(
+            response="Response",
+            context="Context",
+            support_threshold=0.8,
+            dependence_threshold=0.4,
+        )
+
+        assert op.metadata["support_threshold"] == 0.8
+        assert op.metadata["dependence_threshold"] == 0.4
+
+    def test_detect_hallucinations_default_thresholds(self, env):
+        """detect_hallucinations uses default thresholds."""
+        op = env._detect_hallucinations(
+            response="Response",
+            context="Context",
+        )
+
+        assert op.metadata["support_threshold"] == 0.7
+        assert op.metadata["dependence_threshold"] == 0.3
+
+    def test_detect_hallucinations_validates_support_threshold(self, env):
+        """detect_hallucinations validates support_threshold range."""
+        with pytest.raises(ValueError, match="support_threshold must be between"):
+            env._detect_hallucinations("R", "C", support_threshold=1.5)
+
+        with pytest.raises(ValueError, match="support_threshold must be between"):
+            env._detect_hallucinations("R", "C", support_threshold=-0.1)
+
+    def test_detect_hallucinations_validates_dependence_threshold(self, env):
+        """detect_hallucinations validates dependence_threshold range."""
+        with pytest.raises(ValueError, match="dependence_threshold must be between"):
+            env._detect_hallucinations("R", "C", dependence_threshold=2.0)
+
+        with pytest.raises(ValueError, match="dependence_threshold must be between"):
+            env._detect_hallucinations("R", "C", dependence_threshold=-0.5)
+
+    def test_detect_hallucinations_creates_pending_operation(self, env):
+        """detect_hallucinations adds operation to pending operations."""
+        assert env.has_pending_operations() is False
+
+        env._detect_hallucinations("Response", "Context")
+
+        assert env.has_pending_operations() is True
+        ops, _ = env.get_pending_operations()
+        assert len(ops) == 1
+        assert ops[0].operation_type == "detect_hallucinations"
+
+    def test_detect_hallucinations_via_repl_execution(self, env):
+        """detect_hallucinations can be called from REPL code."""
+        result = env.execute("""
+report = detect_hallucinations(
+    response="The function returns 42.",
+    context="def func(): return 42"
+)
+""")
+
+        assert result.success is True
+        assert env.has_pending_operations() is True
+
+    def test_detect_hallucinations_unique_operation_ids(self, env):
+        """Each detect_hallucinations gets a unique operation ID."""
+        op1 = env._detect_hallucinations("Response 1", "Context 1")
+        op2 = env._detect_hallucinations("Response 2", "Context 2")
+
+        assert op1.operation_id != op2.operation_id
+        assert "halluc_" in op1.operation_id
+        assert "halluc_" in op2.operation_id
+
+    def test_detect_hallucinations_query_describes_task(self, env):
+        """detect_hallucinations query describes the detection task."""
+        op = env._detect_hallucinations("Response", "Context")
+
+        assert "hallucinations" in op.query.lower()
+        assert "claims" in op.query.lower()
+
+    def test_detect_hallucinations_boundary_thresholds(self, env):
+        """detect_hallucinations accepts boundary threshold values."""
+        # Valid boundary values
+        op1 = env._detect_hallucinations("R", "C", support_threshold=0.0)
+        assert op1.metadata["support_threshold"] == 0.0
+
+        op2 = env._detect_hallucinations("R", "C", support_threshold=1.0)
+        assert op2.metadata["support_threshold"] == 1.0
+
+        op3 = env._detect_hallucinations("R", "C", dependence_threshold=0.0)
+        assert op3.metadata["dependence_threshold"] == 0.0
+
+        op4 = env._detect_hallucinations("R", "C", dependence_threshold=1.0)
+        assert op4.metadata["dependence_threshold"] == 1.0

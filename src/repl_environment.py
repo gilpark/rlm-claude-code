@@ -50,6 +50,7 @@ MICRO_MODE_BLOCKED = frozenset(
         "verify_claim",  # Uses LLM for verification
         "evidence_dependence",  # Uses LLM for consistency checking
         "audit_reasoning",  # Uses LLM for reasoning trace verification
+        "detect_hallucinations",  # Uses LLM for claim extraction and verification
     }
 )
 
@@ -288,6 +289,7 @@ class RLMEnvironment:
             self.globals["verify_claim"] = self._verify_claim
             self.globals["evidence_dependence"] = self._evidence_dependence
             self.globals["audit_reasoning"] = self._audit_reasoning
+            self.globals["detect_hallucinations"] = self._detect_hallucinations
 
     def _summarize_local(self, var: Any, max_chars: int = 500) -> str:
         """
@@ -634,7 +636,7 @@ class RLMEnvironment:
         if self.access_level != "micro":
             helpers.extend(["llm", "summarize", "map_reduce", "llm_batch"])
             # Epistemic verification helpers (SPEC-16)
-            helpers.extend(["verify_claim", "evidence_dependence", "audit_reasoning"])
+            helpers.extend(["verify_claim", "evidence_dependence", "audit_reasoning", "detect_hallucinations"])
 
         return helpers
 
@@ -1377,6 +1379,84 @@ class RLMEnvironment:
             "steps": validated_steps,
             "sources": sources,
             "step_count": len(validated_steps),
+        }
+        self.pending_operations.append(op)
+        return op
+
+    def _detect_hallucinations(
+        self,
+        response: str,
+        context: str | dict[str, str],
+        support_threshold: float = 0.7,
+        dependence_threshold: float = 0.3,
+    ) -> DeferredOperation:
+        """
+        Detect hallucinations in a response by verifying claims against context.
+
+        Implements: Spec SPEC-16.05
+
+        This high-level function orchestrates the hallucination detection process:
+        1. Extract claims from the response
+        2. Map claims to evidence in the context
+        3. Verify each claim against its evidence
+        4. Return a HallucinationReport with results
+
+        Args:
+            response: The LLM response text to check for hallucinations
+            context: Evidence context, either as string or dict of source_id -> content
+            support_threshold: Minimum evidence support score (0.0-1.0, default 0.7)
+            dependence_threshold: Minimum evidence dependence (0.0-1.0, default 0.3)
+
+        Returns:
+            DeferredOperation that will resolve to HallucinationReport with:
+            - total_claims: Number of claims extracted
+            - verified_claims: Number passing verification
+            - flagged_claims: Number failing verification
+            - claims: List of ClaimVerification for each claim
+            - gaps: List of EpistemicGap for any issues found
+            - overall_confidence: Aggregate confidence score
+            - should_retry: Whether response should be regenerated
+
+        Example:
+            report = detect_hallucinations(
+                response="The function returns 42 and handles errors gracefully.",
+                context="def func(): return 42",
+                support_threshold=0.7
+            )
+        """
+        self._operation_counter += 1
+        op_id = f"halluc_{self._operation_counter}"
+
+        # Validate thresholds
+        if not 0.0 <= support_threshold <= 1.0:
+            raise ValueError(f"support_threshold must be between 0.0 and 1.0, got {support_threshold}")
+        if not 0.0 <= dependence_threshold <= 1.0:
+            raise ValueError(f"dependence_threshold must be between 0.0 and 1.0, got {dependence_threshold}")
+
+        # Normalize context to string
+        if isinstance(context, dict):
+            context_str = "\n\n".join(f"[{k}]:\n{v}" for k, v in context.items())
+            context_sources = context
+        else:
+            context_str = str(context)
+            context_sources = {"main": context_str}
+
+        # Build query for orchestrator
+        query = "Detect hallucinations in response by extracting and verifying claims"
+
+        op = DeferredOperation(
+            operation_id=op_id,
+            operation_type="detect_hallucinations",
+            query=query,
+            context=context_str,
+            spawn_repl=False,
+        )
+        # Store all data needed for orchestrator processing
+        op.metadata = {
+            "response": response,
+            "context_sources": context_sources,
+            "support_threshold": support_threshold,
+            "dependence_threshold": dependence_threshold,
         }
         self.pending_operations.append(op)
         return op
