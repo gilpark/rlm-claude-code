@@ -1351,3 +1351,189 @@ class TestCrossReferenceAPI:
         summary = reasoning_traces.get_fact_usage_summary("nonexistent-id")
 
         assert "error" in summary
+
+
+# =============================================================================
+# Claim Decision Type Tests (SPEC-16.11)
+# =============================================================================
+
+
+class TestClaimDecisionType:
+    """Tests for claim decision type (SPEC-16.11)."""
+
+    def test_claim_in_valid_decision_types(self):
+        """SPEC-16.11: 'claim' is a valid decision type."""
+        from src.reasoning_traces import VALID_DECISION_TYPES
+
+        assert "claim" in VALID_DECISION_TYPES
+
+    def test_create_claim_basic(self, reasoning_traces):
+        """Can create a basic claim node."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="The function returns 42",
+        )
+
+        assert claim_id is not None
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node is not None
+        assert node.decision_type == "claim"
+        assert node.claim_text == "The function returns 42"
+        assert node.content == "The function returns 42"
+        assert node.verification_status == "pending"
+
+    def test_create_claim_with_evidence_ids(self, reasoning_traces):
+        """Can create a claim with evidence IDs."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="X equals Y",
+            evidence_ids=["src1", "src2", "src3"],
+        )
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.evidence_ids == ["src1", "src2", "src3"]
+
+    def test_create_claim_with_confidence(self, reasoning_traces):
+        """Can create a claim with custom confidence."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="High confidence claim",
+            confidence=0.9,
+        )
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.confidence == 0.9
+
+    def test_create_claim_with_parent(self, reasoning_traces):
+        """Can create a claim with a parent decision."""
+        goal_id = reasoning_traces.create_goal("Verify code")
+        decision_id = reasoning_traces.create_decision(goal_id, "Check claims")
+
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Function is correct",
+            parent_id=decision_id,
+        )
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.parent_id == decision_id
+
+    def test_create_claim_with_verification_status(self, reasoning_traces):
+        """Can create a claim with specific verification status."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Verified claim",
+            verification_status="verified",
+        )
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.verification_status == "verified"
+
+    def test_create_claim_invalid_status_raises(self, reasoning_traces):
+        """Creating claim with invalid status raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid verification_status"):
+            reasoning_traces.create_claim(
+                claim_text="Bad claim",
+                verification_status="invalid_status",
+            )
+
+    def test_create_claim_all_valid_statuses(self, reasoning_traces):
+        """All valid verification statuses work."""
+        valid_statuses = ["pending", "verified", "flagged", "refuted"]
+
+        for status in valid_statuses:
+            claim_id = reasoning_traces.create_claim(
+                claim_text=f"Claim with {status}",
+                verification_status=status,
+            )
+            node = reasoning_traces.get_decision_node(claim_id)
+            assert node.verification_status == status
+
+    def test_update_claim_status(self, reasoning_traces):
+        """Can update a claim's verification status."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Pending claim",
+            verification_status="pending",
+        )
+
+        result = reasoning_traces.update_claim_status(claim_id, "verified")
+
+        assert result is True
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.verification_status == "verified"
+
+    def test_update_claim_status_with_confidence(self, reasoning_traces):
+        """Can update claim status and confidence together."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Claim to update",
+            confidence=0.5,
+            verification_status="pending",
+        )
+
+        reasoning_traces.update_claim_status(claim_id, "verified", confidence=0.95)
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.verification_status == "verified"
+        assert node.confidence == 0.95
+
+    def test_update_claim_status_invalid_raises(self, reasoning_traces):
+        """Updating to invalid status raises ValueError."""
+        claim_id = reasoning_traces.create_claim(claim_text="Test claim")
+
+        with pytest.raises(ValueError, match="Invalid verification_status"):
+            reasoning_traces.update_claim_status(claim_id, "bad_status")
+
+    def test_decision_node_claim_fields_default_empty(self, reasoning_traces):
+        """Non-claim nodes have empty claim fields."""
+        goal_id = reasoning_traces.create_goal("Regular goal")
+
+        node = reasoning_traces.get_decision_node(goal_id)
+        assert node.claim_text is None
+        assert node.evidence_ids == []
+        assert node.verification_status is None
+
+    def test_claim_persists_across_queries(self, reasoning_traces):
+        """Claim data persists when queried multiple times."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Persistent claim",
+            evidence_ids=["e1", "e2"],
+            confidence=0.8,
+            verification_status="flagged",
+        )
+
+        # Query multiple times
+        for _ in range(3):
+            node = reasoning_traces.get_decision_node(claim_id)
+            assert node.claim_text == "Persistent claim"
+            assert node.evidence_ids == ["e1", "e2"]
+            assert node.confidence == 0.8
+            assert node.verification_status == "flagged"
+
+    def test_claim_empty_evidence_ids(self, reasoning_traces):
+        """Claim with no evidence IDs stores empty list."""
+        claim_id = reasoning_traces.create_claim(
+            claim_text="Unsupported claim",
+            evidence_ids=[],
+        )
+
+        node = reasoning_traces.get_decision_node(claim_id)
+        assert node.evidence_ids == []
+
+    def test_multiple_claims_independent(self, reasoning_traces):
+        """Multiple claims are stored independently."""
+        claim1_id = reasoning_traces.create_claim(
+            claim_text="First claim",
+            evidence_ids=["a"],
+            verification_status="verified",
+        )
+        claim2_id = reasoning_traces.create_claim(
+            claim_text="Second claim",
+            evidence_ids=["b", "c"],
+            verification_status="flagged",
+        )
+
+        node1 = reasoning_traces.get_decision_node(claim1_id)
+        node2 = reasoning_traces.get_decision_node(claim2_id)
+
+        assert node1.claim_text == "First claim"
+        assert node1.evidence_ids == ["a"]
+        assert node1.verification_status == "verified"
+
+        assert node2.claim_text == "Second claim"
+        assert node2.evidence_ids == ["b", "c"]
+        assert node2.verification_status == "flagged"

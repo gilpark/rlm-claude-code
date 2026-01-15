@@ -26,10 +26,11 @@ class DecisionNode:
     A node in the decision graph.
 
     Implements: Spec SPEC-04.01-03
+    Implements: Spec SPEC-16.11 (claim decision type)
     """
 
     id: str
-    decision_type: str  # goal, decision, option, action, outcome, observation
+    decision_type: str  # goal, decision, option, action, outcome, observation, claim
     content: str
     confidence: float = 0.5
     prompt: str | None = None
@@ -37,6 +38,10 @@ class DecisionNode:
     branch: str | None = None
     commit_hash: str | None = None
     parent_id: str | None = None
+    # Claim-specific fields (SPEC-16.11)
+    claim_text: str | None = None  # The actual claim being verified
+    evidence_ids: list[str] = field(default_factory=list)  # Evidence source IDs
+    verification_status: str | None = None  # pending, verified, flagged, refuted
 
 
 @dataclass
@@ -95,18 +100,24 @@ DECISIONS_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS decisions (
     node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
     decision_type TEXT NOT NULL CHECK(decision_type IN
-        ('goal', 'decision', 'option', 'action', 'outcome', 'observation')),
+        ('goal', 'decision', 'option', 'action', 'outcome', 'observation', 'claim')),
     confidence REAL DEFAULT 0.5,
     prompt TEXT,
     files JSON DEFAULT '[]',
     branch TEXT,
     commit_hash TEXT,
-    parent_id TEXT REFERENCES decisions(node_id)
+    parent_id TEXT REFERENCES decisions(node_id),
+    -- Claim-specific fields (SPEC-16.11)
+    claim_text TEXT,  -- The actual claim text being verified
+    evidence_ids JSON DEFAULT '[]',  -- List of evidence source IDs
+    verification_status TEXT CHECK(verification_status IS NULL OR verification_status IN
+        ('pending', 'verified', 'flagged', 'refuted'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_decisions_type ON decisions(decision_type);
 CREATE INDEX IF NOT EXISTS idx_decisions_parent ON decisions(parent_id);
 CREATE INDEX IF NOT EXISTS idx_decisions_commit ON decisions(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_decisions_verification ON decisions(verification_status);
 """
 
 
@@ -122,6 +133,7 @@ VALID_DECISION_TYPES = frozenset(
         "action",
         "outcome",
         "observation",
+        "claim",  # SPEC-16.11: Epistemic verification claim
     }
 )
 
@@ -407,6 +419,81 @@ class ReasoningTraces:
             decision_type="observation",
             content=content,
         )
+
+    def create_claim(
+        self,
+        claim_text: str,
+        evidence_ids: list[str] | None = None,
+        confidence: float = 0.5,
+        parent_id: str | None = None,
+        verification_status: str = "pending",
+    ) -> str:
+        """
+        Create a claim node for epistemic verification.
+
+        Implements: Spec SPEC-16.11
+
+        Args:
+            claim_text: The claim being verified
+            evidence_ids: List of evidence source IDs supporting/relating to claim
+            confidence: Initial confidence score (0.0-1.0)
+            parent_id: Optional parent decision ID
+            verification_status: Status of verification ('pending', 'verified', 'flagged', 'refuted')
+
+        Returns:
+            Node ID
+        """
+        # Validate verification_status
+        valid_statuses = {"pending", "verified", "flagged", "refuted"}
+        if verification_status not in valid_statuses:
+            raise ValueError(
+                f"Invalid verification_status: {verification_status}. "
+                f"Must be one of: {valid_statuses}"
+            )
+
+        return self._create_decision_node(
+            decision_type="claim",
+            content=claim_text,  # Use claim_text as content for searchability
+            claim_text=claim_text,
+            evidence_ids=evidence_ids or [],
+            confidence=confidence,
+            parent_id=parent_id,
+            verification_status=verification_status,
+        )
+
+    def update_claim_status(
+        self,
+        claim_id: str,
+        verification_status: str,
+        confidence: float | None = None,
+    ) -> bool:
+        """
+        Update a claim's verification status.
+
+        Implements: Spec SPEC-16.11
+
+        Args:
+            claim_id: The claim node ID
+            verification_status: New status ('pending', 'verified', 'flagged', 'refuted')
+            confidence: Optional new confidence score
+
+        Returns:
+            True if updated successfully
+        """
+        valid_statuses = {"pending", "verified", "flagged", "refuted"}
+        if verification_status not in valid_statuses:
+            raise ValueError(
+                f"Invalid verification_status: {verification_status}. "
+                f"Must be one of: {valid_statuses}"
+            )
+
+        updates: dict[str, Any] = {"verification_status": verification_status}
+        if confidence is not None:
+            updates["confidence"] = confidence
+            # Also update the base node confidence
+            self.store.update_node(claim_id, confidence=confidence)
+
+        return self._update_decision(claim_id, **updates)
 
     def link_observation(self, observation_id: str, decision_id: str) -> None:
         """
@@ -1282,21 +1369,32 @@ class ReasoningTraces:
         commit_hash: str | None = None,
         parent_id: str | None = None,
         confidence: float = 0.5,
+        # Claim-specific fields (SPEC-16.11)
+        claim_text: str | None = None,
+        evidence_ids: list[str] | None = None,
+        verification_status: str | None = None,
     ) -> str:
         """Create a decision node in both nodes and decisions tables."""
         import sqlite3
 
         # Create the base node
+        metadata: dict[str, Any] = {
+            "decision_type": decision_type,
+            "prompt": prompt,
+            "files": files or [],
+        }
+        # Add claim-specific metadata if this is a claim
+        if decision_type == "claim":
+            metadata["claim_text"] = claim_text
+            metadata["evidence_ids"] = evidence_ids or []
+            metadata["verification_status"] = verification_status
+
         node_id = self.store.create_node(
             node_type="decision",
             content=content,
             subtype=decision_type,
             confidence=confidence,
-            metadata={
-                "decision_type": decision_type,
-                "prompt": prompt,
-                "files": files or [],
-            },
+            metadata=metadata,
         )
 
         # Create the decision extension record
@@ -1304,8 +1402,12 @@ class ReasoningTraces:
         try:
             conn.execute(
                 """
-                INSERT INTO decisions (node_id, decision_type, confidence, prompt, files, branch, commit_hash, parent_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO decisions (
+                    node_id, decision_type, confidence, prompt, files,
+                    branch, commit_hash, parent_id,
+                    claim_text, evidence_ids, verification_status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node_id,
@@ -1316,6 +1418,9 @@ class ReasoningTraces:
                     branch,
                     commit_hash,
                     parent_id,
+                    claim_text,
+                    json.dumps(evidence_ids or []),
+                    verification_status,
                 ),
             )
             conn.commit()
@@ -1366,6 +1471,11 @@ class ReasoningTraces:
         if isinstance(files, str):
             files = json.loads(files)
 
+        # Parse evidence_ids (SPEC-16.11)
+        evidence_ids = row["evidence_ids"]
+        if isinstance(evidence_ids, str):
+            evidence_ids = json.loads(evidence_ids)
+
         return DecisionNode(
             id=row["node_id"],
             decision_type=row["decision_type"],
@@ -1376,6 +1486,10 @@ class ReasoningTraces:
             branch=row["branch"],
             commit_hash=row["commit_hash"],
             parent_id=row["parent_id"],
+            # Claim-specific fields (SPEC-16.11)
+            claim_text=row["claim_text"],
+            evidence_ids=evidence_ids or [],
+            verification_status=row["verification_status"],
         )
 
 
@@ -1384,4 +1498,6 @@ __all__ = [
     "DecisionNode",
     "DecisionTree",
     "RejectedOption",
+    "EvidenceScore",
+    "VALID_DECISION_TYPES",
 ]
