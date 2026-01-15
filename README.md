@@ -142,7 +142,7 @@ The REPL provides a sandboxed Python environment for context manipulation:
 | `map_reduce(content, map_prompt, reduce_prompt, n_chunks)` | Partition and aggregate |
 | `find_relevant(content, query, top_k)` | Find most relevant sections |
 | `extract_functions(content)` | Parse function definitions |
-| `run_tool(cmd, args)` | Safe subprocess (ty, ruff only) |
+| `run_tool(tool, *args)` | Safe subprocess (uv, ty, ruff) |
 
 **Memory Functions** (when enabled):
 
@@ -153,6 +153,20 @@ The REPL provides a sandboxed Python environment for context manipulation:
 | `memory_add_experience(content, outcome, success)` | Store an experience |
 | `memory_get_context(limit)` | Retrieve relevant context |
 | `memory_relate(node1, node2, relation)` | Create relationships |
+
+**Available Libraries:**
+
+| Library | Alias | Description |
+|---------|-------|-------------|
+| `re` | - | Regular expressions |
+| `json` | - | JSON encoding/decoding |
+| `pydantic` | `BaseModel`, `Field` | Data validation |
+| `hypothesis` | `given`, `st` | Property-based testing |
+| `cpmpy` | `cp` | Constraint programming |
+| `numpy` | `np` | Numerical computing |
+| `pandas` | `pd` | DataFrames and analysis |
+| `polars` | `pl` | Fast DataFrames |
+| `seaborn` | `sns` | Statistical visualization |
 
 ### Memory System
 

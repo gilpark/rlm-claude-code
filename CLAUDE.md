@@ -195,9 +195,24 @@ SPEC implementations:
 | `map_reduce(content, map_p, reduce_p)` | Partition+aggregate |
 | `find_relevant(content, query, top_k)` | Relevance search |
 | `extract_functions(content)` | Parse functions |
+| `run_tool(tool, *args)` | Run CLI tools (uv, ty, ruff) |
 | `memory_query(query)` | Search memory |
 | `memory_add_fact(content, conf)` | Store fact |
 | `memory_add_experience(...)` | Store experience |
+
+## REPL Libraries
+
+| Library | Alias | Purpose |
+|---------|-------|---------|
+| `re` | - | Regular expressions |
+| `json` | - | JSON encoding/decoding |
+| `pydantic` | `BaseModel`, `Field` | Data validation |
+| `hypothesis` | `given`, `st` | Property-based testing |
+| `cpmpy` | `cp` | Constraint programming |
+| `numpy` | `np` | Numerical computing |
+| `pandas` | `pd` | DataFrames and analysis |
+| `polars` | `pl` | Fast DataFrames |
+| `seaborn` | `sns` | Statistical visualization |
 
 ## Code Style
 
