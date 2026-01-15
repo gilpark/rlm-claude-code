@@ -35,6 +35,7 @@ This specification defines capabilities for the RLM-Claude-Code project, coverin
 | P0 | Rich Output Formatting | [SPEC-13](./13-rich-output.md) | 🚧 Active |
 | P0 | Always-On Micro-RLM | [SPEC-14](./14-always-on-rlm.md) | 🚧 Active |
 | P2 | Lean REPL Integration | [SPEC-15](./15-lean-repl.md) | ⏸️ Deferred |
+| P0 | Epistemic Verification | [SPEC-16](./16-epistemic-verification.md) | 📋 Planned |
 
 ## Dependencies
 
@@ -59,6 +60,7 @@ Phase 3 (UX & Verification):
 SPEC-13 (Rich Output) ────► SPEC-04, SPEC-05
 SPEC-14 (Always-On) ──────► SPEC-05, SPEC-06, SPEC-13
 SPEC-15 (Lean REPL) ──────► SPEC-01, SPEC-13, SPEC-14 [DEFERRED]
+SPEC-16 (Epistemic) ──────► SPEC-01, SPEC-04, SPEC-05
 ```
 
 ## Success Criteria
@@ -128,6 +130,12 @@ SPEC-15 (Lean REPL) ──────► SPEC-01, SPEC-13, SPEC-14 [DEFERRED]
 - SPEC-15.40-15.45: Auto-formalization
 - SPEC-15.50-15.54: RLM integration
 - SPEC-15.60-15.65: Installation and setup
+
+### Phase 3D: Epistemic Verification (Planned)
+- SPEC-16.01-16.10: Core types & REPL functions
+- SPEC-16.11-16.20: Reasoning traces integration
+- SPEC-16.21-16.30: Orchestrator integration (always-on)
+- SPEC-16.31-16.40: Polish & optimization
 
 ## References
 
