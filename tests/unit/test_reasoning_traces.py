@@ -2107,3 +2107,270 @@ class TestAddClaimMethod:
         assert node1.claim_text == "First claim"
         assert node2.claim_text == "Second claim"
         assert node3.claim_text == "Third claim"
+
+
+# =============================================================================
+# SPEC-16.16: verify_claim() Method
+# =============================================================================
+
+
+class TestVerifyClaimMethod:
+    """
+    Tests for verify_claim() method.
+
+    @trace SPEC-16.16
+    """
+
+    def _make_mock_verification_model(
+        self,
+        support: float = 0.8,
+        dependence: float = 0.7,
+        consistency: float = 0.9,
+        is_flagged: bool = False,
+        flag_reason: str | None = None,
+    ):
+        """Create a mock verification model that returns predetermined scores."""
+        from src.epistemic.types import ClaimVerification
+
+        def mock_model(claim_text: str, evidence: list) -> ClaimVerification:
+            return ClaimVerification(
+                claim_id="mock",
+                claim_text=claim_text,
+                evidence_ids=[e["id"] for e in evidence],
+                evidence_support=support,
+                evidence_dependence=dependence,
+                consistency_score=consistency,
+                is_flagged=is_flagged,
+                flag_reason=flag_reason,
+            )
+
+        return mock_model
+
+    def test_verify_claim_creates_verification_node(self, reasoning_traces):
+        """verify_claim creates a verification node."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim to verify",
+        )
+
+        mock_model = self._make_mock_verification_model()
+        verification_id = reasoning_traces.verify_claim(claim_id, mock_model)
+
+        verification_node = reasoning_traces.get_decision_node(verification_id)
+        assert verification_node is not None
+        assert verification_node.decision_type == "verification"
+
+    def test_verify_claim_uses_model_scores(self, reasoning_traces):
+        """verify_claim uses scores from verification model."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(
+            support=0.85,
+            dependence=0.65,
+            consistency=0.95,
+        )
+        verification_id = reasoning_traces.verify_claim(claim_id, mock_model)
+
+        verification_node = reasoning_traces.get_decision_node(verification_id)
+        assert verification_node.support_score == 0.85
+        assert verification_node.dependence_score == 0.65
+        assert verification_node.consistency_score == 0.95
+
+    def test_verify_claim_links_to_claim(self, reasoning_traces):
+        """verify_claim creates edge linking verification to claim."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model()
+        verification_id = reasoning_traces.verify_claim(claim_id, mock_model)
+
+        verification_node = reasoning_traces.get_decision_node(verification_id)
+        assert verification_node.verified_claim_id == claim_id
+
+    def test_verify_claim_updates_claim_status_verified(self, reasoning_traces):
+        """verify_claim updates claim to 'verified' status on success."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(is_flagged=False)
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        claim_node = reasoning_traces.get_decision_node(claim_id)
+        assert claim_node.verification_status == "verified"
+
+    def test_verify_claim_updates_claim_status_flagged(self, reasoning_traces):
+        """verify_claim updates claim to 'flagged' status when flagged."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(
+            is_flagged=True,
+            flag_reason="low_dependence",
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        claim_node = reasoning_traces.get_decision_node(claim_id)
+        assert claim_node.verification_status == "flagged"
+
+    def test_verify_claim_updates_claim_status_refuted(self, reasoning_traces):
+        """verify_claim updates claim to 'refuted' for critical failures."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(
+            is_flagged=True,
+            flag_reason="unsupported",
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        claim_node = reasoning_traces.get_decision_node(claim_id)
+        assert claim_node.verification_status == "refuted"
+
+    def test_verify_claim_error_nonexistent_claim(self, reasoning_traces):
+        """verify_claim raises error for nonexistent claim."""
+        mock_model = self._make_mock_verification_model()
+
+        with pytest.raises(ValueError, match="Claim not found"):
+            reasoning_traces.verify_claim("nonexistent-id", mock_model)
+
+    def test_verify_claim_error_wrong_node_type(self, reasoning_traces):
+        """verify_claim raises error for non-claim nodes."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        mock_model = self._make_mock_verification_model()
+
+        with pytest.raises(ValueError, match="is not a claim"):
+            reasoning_traces.verify_claim(goal_id, mock_model)
+
+    def test_verify_claim_passes_evidence_to_model(self, reasoning_traces):
+        """verify_claim retrieves and passes evidence to verification model."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+
+        # Create evidence nodes
+        evidence1_id = reasoning_traces.create_observation("Evidence fact 1")
+        evidence2_id = reasoning_traces.create_observation("Evidence fact 2")
+
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+            evidence_ids=[evidence1_id, evidence2_id],
+        )
+
+        # Track what evidence is passed to model
+        received_evidence = []
+
+        def tracking_model(claim_text: str, evidence: list):
+            from src.epistemic.types import ClaimVerification
+
+            received_evidence.extend(evidence)
+            return ClaimVerification(
+                claim_id="mock",
+                claim_text=claim_text,
+                evidence_ids=[e["id"] for e in evidence],
+            )
+
+        reasoning_traces.verify_claim(claim_id, tracking_model)
+
+        assert len(received_evidence) == 2
+        evidence_ids = [e["id"] for e in received_evidence]
+        assert evidence1_id in evidence_ids
+        assert evidence2_id in evidence_ids
+        evidence_contents = [e["content"] for e in received_evidence]
+        assert "Evidence fact 1" in evidence_contents
+        assert "Evidence fact 2" in evidence_contents
+
+    def test_verify_claim_creates_verifies_edge(self, reasoning_traces):
+        """verify_claim creates 'verifies' edge for positive verification."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(is_flagged=False)
+        verification_id = reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # Check for verifies edge
+        edges = reasoning_traces.store.get_edges_for_node(verification_id)
+        verifies_edges = [e for e in edges if e.label == "verifies"]
+        assert len(verifies_edges) == 1
+
+    def test_verify_claim_creates_refutes_edge(self, reasoning_traces):
+        """verify_claim creates 'refutes' edge for negative verification."""
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id,
+            content="Test decision",
+            prompt="Testing?",
+        )
+        claim_id = reasoning_traces.add_claim(
+            decision_id=decision_id,
+            claim="Test claim",
+        )
+
+        mock_model = self._make_mock_verification_model(
+            is_flagged=True,
+            flag_reason="contradiction",
+        )
+        verification_id = reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # Check for refutes edge
+        edges = reasoning_traces.store.get_edges_for_node(verification_id)
+        refutes_edges = [e for e in edges if e.label == "refutes"]
+        assert len(refutes_edges) == 1

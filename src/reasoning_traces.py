@@ -8,11 +8,44 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    from .epistemic.types import ClaimVerification
     from .memory_store import MemoryStore
     from .trajectory import TrajectoryEvent
+
+
+class VerificationModel(Protocol):
+    """
+    Protocol for epistemic verification models.
+
+    Implements: SPEC-16.16
+
+    A verification model takes a claim and its cited evidence,
+    and returns a ClaimVerification result with scores indicating
+    how well the evidence supports the claim.
+    """
+
+    def __call__(
+        self,
+        claim_text: str,
+        evidence: list[dict[str, Any]],
+    ) -> ClaimVerification:
+        """
+        Verify a claim against evidence.
+
+        Args:
+            claim_text: The claim to verify
+            evidence: List of evidence items, each with:
+                - id: Evidence node ID
+                - content: Evidence text content
+                - confidence: Evidence confidence score (optional)
+
+        Returns:
+            ClaimVerification with verification scores
+        """
+        ...
 
 
 # =============================================================================
@@ -586,6 +619,96 @@ class ReasoningTraces:
                 self.link_claim_to_evidence(claim_id, evidence_id)
 
         return claim_id
+
+    def verify_claim(
+        self,
+        claim_id: str,
+        verification_model: VerificationModel,
+    ) -> str:
+        """
+        Verify a claim using an epistemic verification model.
+
+        Implements: Spec SPEC-16.16
+
+        This method:
+        1. Retrieves the claim and its cited evidence
+        2. Calls the verification model with claim text and evidence
+        3. Creates a verification node with the result
+        4. Links via 'verifies' or 'refutes' edge (handled by create_verification)
+
+        Args:
+            claim_id: The ID of the claim to verify
+            verification_model: A callable that verifies claims against evidence.
+                Must conform to the VerificationModel protocol.
+
+        Returns:
+            The verification node ID
+
+        Raises:
+            ValueError: If claim_id doesn't exist or isn't a claim node
+        """
+        # 1. Retrieve the claim node
+        claim_node = self.get_decision_node(claim_id)
+        if claim_node is None:
+            raise ValueError(f"Claim not found: {claim_id}")
+        if claim_node.decision_type != "claim":
+            raise ValueError(
+                f"Node {claim_id} is not a claim (type: {claim_node.decision_type})"
+            )
+
+        # 2. Get evidence from the claim's evidence_ids and/or "cites" edges
+        evidence_ids = set(claim_node.evidence_ids or [])
+
+        # Also check for "cites" edges to find additional evidence
+        edges = self.store.query_edges(label="cites")
+        for edge in edges:
+            members = self.store.get_edge_members(edge.id)
+            # Check if this edge originates from our claim
+            subject = next((m for m in members if m["role"] == "subject"), None)
+            obj = next((m for m in members if m["role"] == "object"), None)
+            if subject and subject["node_id"] == claim_id and obj:
+                evidence_ids.add(obj["node_id"])
+
+        # 3. Retrieve evidence content
+        evidence: list[dict[str, Any]] = []
+        for evidence_id in evidence_ids:
+            evidence_node = self.store.get_node(evidence_id)
+            if evidence_node:
+                evidence.append(
+                    {
+                        "id": evidence_id,
+                        "content": evidence_node.content,
+                        "confidence": evidence_node.confidence,
+                    }
+                )
+
+        # 4. Call the verification model
+        claim_text = claim_node.claim_text or claim_node.content
+        verification_result = verification_model(claim_text, evidence)
+
+        # 5. Create verification node with result
+        verification_id = self.create_verification(
+            claim_id=claim_id,
+            support_score=verification_result.evidence_support,
+            dependence_score=verification_result.evidence_dependence,
+            consistency_score=verification_result.consistency_score,
+            is_flagged=verification_result.is_flagged,
+            flag_reason=verification_result.flag_reason,
+            confidence=verification_result.combined_score,
+            parent_id=claim_node.parent_id,
+        )
+
+        # 6. Update claim verification status based on result
+        if verification_result.is_flagged:
+            new_status = verification_result.flag_reason or "flagged"
+            if new_status in ("unsupported", "phantom_citation", "contradiction"):
+                self.update_claim_status(claim_id, "refuted")
+            else:
+                self.update_claim_status(claim_id, "flagged")
+        else:
+            self.update_claim_status(claim_id, "verified")
+
+        return verification_id
 
     def create_verification(
         self,
@@ -1715,4 +1838,5 @@ __all__ = [
     "EvidenceScore",
     "VALID_DECISION_TYPES",
     "EPISTEMIC_EDGE_LABELS",
+    "VerificationModel",
 ]
