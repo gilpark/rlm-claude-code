@@ -34,10 +34,10 @@ uv run pytest tests/ -v
 
 ```bash
 # Add the marketplace (one-time setup)
-claude plugin marketplace add rlm-claude-code github:rand/rlm-claude-code
+claude plugin marketplace add github:rand/rlm-claude-code
 
 # Install the plugin
-claude plugin install rlm-claude-code@rlm-claude-code --scope user
+claude plugin install rlm-claude-code@rlm-claude-code
 ```
 
 After installation, start Claude Code and you should see "RLM initialized" on startup.
