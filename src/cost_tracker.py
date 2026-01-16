@@ -40,6 +40,7 @@ class CostComponent(Enum):
     CONTEXT_LOAD = "context_load"
     SUMMARIZATION = "summarization"
     TOOL_OUTPUT = "tool_output"
+    VERIFICATION = "verification"  # SPEC-16.27: Epistemic verification calls
 
 
 # Token costs per model (per 1M tokens, Jan 2026 pricing)
@@ -393,6 +394,7 @@ class CostTracker:
             CostComponent.CONTEXT_LOAD: 0,  # No overhead
             CostComponent.SUMMARIZATION: 300,  # Summarization instructions
             CostComponent.TOOL_OUTPUT: 50,  # Tool framing
+            CostComponent.VERIFICATION: 200,  # SPEC-16.27: Verification prompt overhead
         }
         return overheads.get(component, 0)
 
