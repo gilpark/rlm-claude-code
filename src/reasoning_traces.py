@@ -802,6 +802,215 @@ class ReasoningTraces:
 
         return verification_id
 
+    def get_epistemic_gaps(
+        self,
+        goal_id: str,
+        support_threshold: float = 0.7,
+    ) -> list:
+        """
+        Find all epistemic gaps in a decision tree.
+
+        Implements: Spec SPEC-16.17
+
+        Traverses the decision tree rooted at goal_id, finds all claims
+        with insufficient evidence support, and returns EpistemicGap objects.
+
+        A claim has an epistemic gap if:
+        - It has a verification that flagged it
+        - Its verification support_score is below the threshold
+        - It has no verification but is marked with low confidence
+
+        Args:
+            goal_id: Root goal ID to traverse
+            support_threshold: Minimum support score to not be flagged (default 0.7)
+
+        Returns:
+            List of EpistemicGap objects for claims with insufficient evidence
+
+        Raises:
+            ValueError: If goal_id doesn't exist
+        """
+        from .epistemic import EpistemicGap
+
+        # Verify goal exists
+        goal = self.get_decision_node(goal_id)
+        if goal is None:
+            raise ValueError(f"Goal not found: {goal_id}")
+
+        gaps: list[EpistemicGap] = []
+
+        # Collect all claims that are descendants of this goal
+        claims = self._collect_claims_under_goal(goal_id)
+
+        # For each claim, check for verification issues
+        for claim in claims:
+            verification = self._get_verification_for_claim(claim.id)
+
+            if verification is not None:
+                # Claim has been verified
+                if verification.is_flagged:
+                    # Verification flagged an issue
+                    gap_type = self._flag_reason_to_gap_type(verification.flag_reason)
+                    suggested_action = self._get_suggested_action(gap_type)
+
+                    # Calculate gap_bits from support score
+                    # Higher gap_bits means lower support
+                    support = verification.support_score or 0.5
+                    gap_bits = max(0.0, -2.0 * (support - 1.0))  # 0 support = 2 bits gap
+
+                    gaps.append(
+                        EpistemicGap(
+                            claim_id=claim.id,
+                            claim_text=claim.claim_text or claim.content,
+                            gap_type=gap_type,
+                            gap_bits=gap_bits,
+                            suggested_action=suggested_action,
+                        )
+                    )
+                elif (verification.support_score or 1.0) < support_threshold:
+                    # Support score is below threshold but not flagged
+                    gaps.append(
+                        EpistemicGap(
+                            claim_id=claim.id,
+                            claim_text=claim.claim_text or claim.content,
+                            gap_type="partial_support",
+                            gap_bits=max(0.0, support_threshold - (verification.support_score or 0.0)),
+                            suggested_action="Provide additional evidence to strengthen claim",
+                        )
+                    )
+            else:
+                # Claim has no verification - check if it has low confidence
+                if claim.confidence is not None and claim.confidence < 0.5:
+                    gaps.append(
+                        EpistemicGap(
+                            claim_id=claim.id,
+                            claim_text=claim.claim_text or claim.content,
+                            gap_type="unsupported",
+                            gap_bits=1.0,  # Default gap for unverified low-confidence claims
+                            suggested_action="Verify claim against available evidence",
+                        )
+                    )
+
+        return gaps
+
+    def _collect_claims_under_goal(self, goal_id: str) -> list[DecisionNode]:
+        """
+        Collect all claim nodes that are descendants of a goal.
+
+        Uses recursive CTE to find all descendants in the parent hierarchy,
+        then filters for claim nodes.
+
+        Args:
+            goal_id: The root goal ID
+
+        Returns:
+            List of DecisionNode objects with decision_type='claim'
+        """
+        import sqlite3
+
+        conn = sqlite3.connect(self.store.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            # Use recursive CTE to find all descendants
+            cursor = conn.execute(
+                """
+                WITH RECURSIVE descendants(node_id) AS (
+                    -- Base case: direct children of goal
+                    SELECT node_id FROM decisions WHERE parent_id = ?
+                    UNION ALL
+                    -- Recursive case: children of descendants
+                    SELECT d.node_id FROM decisions d
+                    JOIN descendants desc ON d.parent_id = desc.node_id
+                )
+                SELECT d.*, n.content
+                FROM decisions d
+                JOIN nodes n ON d.node_id = n.id
+                WHERE d.node_id IN (SELECT node_id FROM descendants)
+                AND d.decision_type = 'claim'
+                """,
+                (goal_id,),
+            )
+
+            claims = []
+            for row in cursor.fetchall():
+                claims.append(self._row_to_decision_node(row))
+            return claims
+        finally:
+            conn.close()
+
+    def _get_verification_for_claim(self, claim_id: str) -> DecisionNode | None:
+        """
+        Find the most recent verification for a claim.
+
+        Args:
+            claim_id: The claim to find verification for
+
+        Returns:
+            DecisionNode with the verification, or None if not verified
+        """
+        import sqlite3
+
+        # Query for verification nodes that reference this claim
+        conn = sqlite3.connect(self.store.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.execute(
+                """
+                SELECT node_id FROM decisions
+                WHERE decision_type = 'verification'
+                AND verified_claim_id = ?
+                ORDER BY node_id DESC
+                LIMIT 1
+                """,
+                (claim_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                return self.get_decision_node(row["node_id"])
+            return None
+        finally:
+            conn.close()
+
+    def _flag_reason_to_gap_type(self, flag_reason: str | None) -> str:
+        """
+        Map flag_reason to GapType.
+
+        Args:
+            flag_reason: The flag reason from verification
+
+        Returns:
+            Corresponding GapType string
+        """
+        mapping = {
+            "unsupported": "unsupported",
+            "phantom_citation": "phantom_citation",
+            "low_dependence": "evidence_independent",
+            "contradiction": "contradicted",
+            "over_extrapolation": "over_extrapolation",
+            "confidence_mismatch": "partial_support",
+        }
+        return mapping.get(flag_reason or "", "unsupported")
+
+    def _get_suggested_action(self, gap_type: str) -> str:
+        """
+        Get suggested remediation action for a gap type.
+
+        Args:
+            gap_type: The type of epistemic gap
+
+        Returns:
+            Suggested action string
+        """
+        actions = {
+            "unsupported": "Find evidence that supports this claim or remove it",
+            "phantom_citation": "Correct the citation to reference actual evidence",
+            "evidence_independent": "Verify that evidence actually informs the claim",
+            "contradicted": "Resolve contradiction between claim and evidence",
+            "over_extrapolation": "Qualify claim or find additional supporting evidence",
+            "partial_support": "Provide additional evidence to strengthen claim",
+        }
+        return actions.get(gap_type, "Review claim against available evidence")
+
     def link_observation(self, observation_id: str, decision_id: str) -> None:
         """
         Link an observation to a decision (informs).

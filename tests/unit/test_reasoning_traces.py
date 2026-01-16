@@ -2374,3 +2374,282 @@ class TestVerifyClaimMethod:
         edges = reasoning_traces.store.get_edges_for_node(verification_id)
         refutes_edges = [e for e in edges if e.label == "refutes"]
         assert len(refutes_edges) == 1
+
+
+# =============================================================================
+# SPEC-16.17: get_epistemic_gaps()
+# =============================================================================
+
+
+class TestGetEpistemicGaps:
+    """
+    Tests for get_epistemic_gaps() method.
+
+    @trace SPEC-16.17
+    """
+
+    def _make_mock_verification_model(
+        self,
+        evidence_support: float = 0.8,
+        evidence_dependence: float = 0.7,
+        consistency_score: float = 0.9,
+        is_flagged: bool = False,
+        flag_reason: str | None = None,
+    ):
+        """Create a mock verification model."""
+        from src.epistemic import ClaimVerification
+
+        def mock_model(claim_text: str, evidence: list) -> ClaimVerification:
+            return ClaimVerification(
+                claim_id="mock",
+                claim_text=claim_text,
+                evidence_support=evidence_support,
+                evidence_dependence=evidence_dependence,
+                consistency_score=consistency_score,
+                is_flagged=is_flagged,
+                flag_reason=flag_reason,
+            )
+
+        return mock_model
+
+    def test_get_epistemic_gaps_exists(self, reasoning_traces):
+        """
+        get_epistemic_gaps method should exist.
+
+        @trace SPEC-16.17
+        """
+        assert hasattr(reasoning_traces, "get_epistemic_gaps")
+        assert callable(reasoning_traces.get_epistemic_gaps)
+
+    def test_get_epistemic_gaps_raises_for_nonexistent_goal(self, reasoning_traces):
+        """
+        get_epistemic_gaps raises ValueError for nonexistent goal.
+
+        @trace SPEC-16.17
+        """
+        with pytest.raises(ValueError, match="Goal not found"):
+            reasoning_traces.get_epistemic_gaps("nonexistent-goal")
+
+    def test_get_epistemic_gaps_returns_empty_for_no_claims(self, reasoning_traces):
+        """
+        get_epistemic_gaps returns empty list when no claims exist.
+
+        @trace SPEC-16.17
+        """
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+        assert gaps == []
+
+    def test_get_epistemic_gaps_finds_flagged_claims(self, reasoning_traces):
+        """
+        get_epistemic_gaps identifies claims with flagged verifications.
+
+        @trace SPEC-16.17
+        """
+        from src.epistemic import EpistemicGap
+
+        # Create goal -> decision -> claim
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id,
+            claim_text="The API returns JSON",
+        )
+
+        # Verify claim with flagged result
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.2,
+            is_flagged=True,
+            flag_reason="unsupported",
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # Get gaps
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+
+        assert len(gaps) == 1
+        assert isinstance(gaps[0], EpistemicGap)
+        assert gaps[0].claim_id == claim_id
+        assert gaps[0].gap_type == "unsupported"
+        assert gaps[0].claim_text == "The API returns JSON"
+
+    def test_get_epistemic_gaps_finds_low_support_claims(self, reasoning_traces):
+        """
+        get_epistemic_gaps identifies claims with low support scores.
+
+        @trace SPEC-16.17
+        """
+        # Create goal -> decision -> claim
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id,
+            claim_text="The function handles errors",
+        )
+
+        # Verify claim with low support but not flagged
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.5,  # Below default threshold of 0.7
+            is_flagged=False,
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # Get gaps
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+
+        assert len(gaps) == 1
+        assert gaps[0].gap_type == "partial_support"
+        assert gaps[0].gap_bits > 0
+
+    def test_get_epistemic_gaps_custom_threshold(self, reasoning_traces):
+        """
+        get_epistemic_gaps respects custom support threshold.
+
+        @trace SPEC-16.17
+        """
+        # Create goal -> decision -> claim
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id,
+            claim_text="The database uses WAL mode",
+        )
+
+        # Verify claim with moderate support
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.6,
+            is_flagged=False,
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # With default threshold (0.7), should find gap
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+        assert len(gaps) == 1
+
+        # With lower threshold (0.5), should not find gap
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id, support_threshold=0.5)
+        assert len(gaps) == 0
+
+    def test_get_epistemic_gaps_ignores_verified_claims(self, reasoning_traces):
+        """
+        get_epistemic_gaps does not flag well-verified claims.
+
+        @trace SPEC-16.17
+        """
+        # Create goal -> decision -> claim
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id,
+            claim_text="The function exists in utils.py",
+        )
+
+        # Verify claim with good support
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.9,
+            is_flagged=False,
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        # Get gaps - should be empty
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+        assert len(gaps) == 0
+
+    def test_get_epistemic_gaps_multiple_claims(self, reasoning_traces):
+        """
+        get_epistemic_gaps finds gaps across multiple claims.
+
+        @trace SPEC-16.17
+        """
+        # Create goal with multiple claims
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+
+        # Create 3 claims
+        claim1_id = reasoning_traces.create_claim(
+            parent_id=decision_id, claim_text="Claim 1 - will be verified"
+        )
+        claim2_id = reasoning_traces.create_claim(
+            parent_id=decision_id, claim_text="Claim 2 - will be flagged"
+        )
+        claim3_id = reasoning_traces.create_claim(
+            parent_id=decision_id, claim_text="Claim 3 - low support"
+        )
+
+        # Verify claims with different results
+        good_model = self._make_mock_verification_model(evidence_support=0.9)
+        flagged_model = self._make_mock_verification_model(
+            evidence_support=0.1, is_flagged=True, flag_reason="phantom_citation"
+        )
+        low_model = self._make_mock_verification_model(evidence_support=0.5)
+
+        reasoning_traces.verify_claim(claim1_id, good_model)
+        reasoning_traces.verify_claim(claim2_id, flagged_model)
+        reasoning_traces.verify_claim(claim3_id, low_model)
+
+        # Get gaps
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+
+        assert len(gaps) == 2  # claim2 (flagged) and claim3 (low support)
+        gap_claim_ids = {g.claim_id for g in gaps}
+        assert claim2_id in gap_claim_ids
+        assert claim3_id in gap_claim_ids
+        assert claim1_id not in gap_claim_ids
+
+    def test_get_epistemic_gaps_maps_flag_reason_to_gap_type(self, reasoning_traces):
+        """
+        get_epistemic_gaps correctly maps flag reasons to gap types.
+
+        @trace SPEC-16.17
+        """
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+
+        # Test phantom_citation mapping
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id, claim_text="See docs/api.md for details"
+        )
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.0, is_flagged=True, flag_reason="phantom_citation"
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+        assert len(gaps) == 1
+        assert gaps[0].gap_type == "phantom_citation"
+
+    def test_get_epistemic_gaps_includes_suggested_action(self, reasoning_traces):
+        """
+        get_epistemic_gaps includes suggested actions for each gap.
+
+        @trace SPEC-16.17
+        """
+        goal_id = reasoning_traces.create_goal(content="Test goal")
+        decision_id = reasoning_traces.create_decision(
+            goal_id=goal_id, content="Test decision"
+        )
+        claim_id = reasoning_traces.create_claim(
+            parent_id=decision_id, claim_text="The config file is required"
+        )
+
+        mock_model = self._make_mock_verification_model(
+            evidence_support=0.1, is_flagged=True, flag_reason="unsupported"
+        )
+        reasoning_traces.verify_claim(claim_id, mock_model)
+
+        gaps = reasoning_traces.get_epistemic_gaps(goal_id)
+        assert len(gaps) == 1
+        assert gaps[0].suggested_action != ""
+        assert "evidence" in gaps[0].suggested_action.lower()
