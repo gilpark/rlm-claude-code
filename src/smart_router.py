@@ -8,6 +8,9 @@ Routes queries to the optimal model based on:
 - Task complexity
 - Provider strengths (Codex for code, Opus for reasoning)
 - Cost/speed tradeoffs
+
+When rlm_core is available, provides optional delegation to the
+rlm_core.SmartRouter for lightweight routing decisions.
 """
 
 from __future__ import annotations
@@ -18,6 +21,30 @@ from enum import Enum
 from typing import Any
 
 from .api_client import Provider, resolve_model
+from .config import USE_RLM_CORE
+
+# ============================================================================
+# rlm_core Integration (Phase 7 Migration)
+# ============================================================================
+
+# Conditional import of rlm_core bindings
+_rlm_core = None
+if USE_RLM_CORE:
+    try:
+        import rlm_core as _rlm_core
+    except ImportError:
+        import warnings
+
+        warnings.warn(
+            "RLM_USE_CORE=true but rlm_core not installed. "
+            "Falling back to Python implementation."
+        )
+        _rlm_core = None
+
+
+def _rlm_core_available() -> bool:
+    """Check if rlm_core is available."""
+    return _rlm_core is not None
 
 
 class QueryType(Enum):
@@ -450,6 +477,75 @@ class SmartRouter:
         self.prefer_cost = prefer_cost
         self.force_provider = force_provider
         self._routing_history: list[dict[str, Any]] = []
+
+        # Initialize rlm_core router if available
+        self._core_router: Any = None
+        if _rlm_core is not None:
+            try:
+                self._core_router = _rlm_core.SmartRouter()
+            except Exception:
+                self._core_router = None
+
+    @property
+    def uses_rlm_core(self) -> bool:
+        """Return True if rlm_core SmartRouter is available."""
+        return self._core_router is not None
+
+    def route_core(
+        self,
+        query: str,
+        depth: int = 0,
+        max_depth: int = 5,
+        remaining_budget: float | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Route using rlm_core SmartRouter for lightweight decisions.
+
+        This provides a fast, pattern-based routing alternative to the
+        full Python router. Returns None if rlm_core is not available.
+
+        Args:
+            query: The query to route
+            depth: Current recursion depth
+            max_depth: Maximum recursion depth
+            remaining_budget: Remaining cost budget
+
+        Returns:
+            Dict with model, tier, and reason, or None if unavailable
+        """
+        if self._core_router is None or _rlm_core is None:
+            return None
+
+        try:
+            # Build RoutingContext
+            ctx = _rlm_core.RoutingContext()
+            ctx = ctx.with_depth(depth)
+            ctx = ctx.with_max_depth(max_depth)
+            if remaining_budget is not None:
+                ctx = ctx.with_budget(remaining_budget)
+
+            # Get routing decision
+            decision = self._core_router.route(query, ctx)
+
+            # Convert tier to string
+            tier_str = str(decision.tier)
+            if "Fast" in tier_str:
+                tier = "fast"
+            elif "Balanced" in tier_str:
+                tier = "balanced"
+            elif "Powerful" in tier_str:
+                tier = "powerful"
+            else:
+                tier = "balanced"
+
+            return {
+                "model": decision.model.id if hasattr(decision.model, "id") else str(decision.model),
+                "tier": tier,
+                "reason": decision.reason,
+            }
+
+        except Exception:
+            return None
 
     def route(
         self,
