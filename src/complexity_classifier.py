@@ -46,11 +46,12 @@ def _convert_to_rlm_core_context(context: SessionContext) -> "_rlm_core.SessionC
 
     # Convert tool outputs
     for output in context.tool_outputs:
-        core_ctx.add_tool_output(output.tool_name, output.content)
+        core_output = _rlm_core.ToolOutput(output.tool_name, output.content)
+        core_ctx.add_tool_output(core_output)
 
     # Cache files
-    for file_path in context.files:
-        core_ctx.cache_file(file_path)
+    for file_path, content in context.files.items():
+        core_ctx.cache_file(file_path, content)
 
     return core_ctx
 
