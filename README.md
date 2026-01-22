@@ -42,30 +42,46 @@ uv run pytest tests/ -v
 
 ### Optional: Building rlm-core for Performance
 
-For 10-50x faster pattern classification, install the [rlm-core](https://github.com/rand/loop) Python bindings:
+For 10-50x faster pattern classification, build the [rlm-core](https://github.com/rand/loop) Rust library with Python bindings:
 
 ```bash
 # Clone rlm-core (if not already present)
 git clone https://github.com/rand/loop.git ~/src/loop
 
-# Build and install the Python bindings
+# Install maturin (Rust-Python build tool)
+uv tool install maturin
+
+# Build the Python bindings
 cd ~/src/loop/rlm-core
 PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 uv run maturin develop --release
 
-# Add to your project's venv
-echo "~/src/loop/rlm-core/python" > /path/to/rlm-claude-code/.venv/lib/python3.12/site-packages/rlm_core.pth
+# Verify the build succeeded
+ls -la ~/src/loop/rlm-core/python/rlm_core*.so
+```
 
-# Verify rlm_core is importable
+To use rlm-core with the standalone package (not plugin):
+
+```bash
 cd /path/to/rlm-claude-code
-uv run python -c "import rlm_core; print(rlm_core.PatternClassifier)"
 
-# Enable rlm-core (set in environment or shell)
+# Link rlm_core to your venv
+echo "$HOME/src/loop/rlm-core/python" > .venv/lib/python3.12/site-packages/rlm_core.pth
+
+# Verify import works
+uv run python -c "import rlm_core; print('OK:', rlm_core.PatternClassifier)"
+
+# Enable via config (persistent) or environment (temporary)
+# Config method - add to ~/.claude/rlm-config.json:
+#   "use_rlm_core": true
+# Environment method:
 export RLM_USE_CORE=true
 ```
 
-Without rlm-core, all functionality works using Python fallback implementations.
+**Without rlm-core**: All functionality works using Python fallback implementations. You'll see warnings but everything operates correctly.
 
 ### As a Claude Code Plugin
+
+#### Step 1: Install the Plugin
 
 ```bash
 # Add the marketplace (one-time setup)
@@ -75,7 +91,79 @@ claude plugin marketplace add github:rand/rlm-claude-code
 claude plugin install rlm-claude-code@rlm-claude-code
 ```
 
-After installation, start Claude Code and you should see "RLM initialized" on startup.
+#### Step 2: Set Up the Plugin Environment
+
+The plugin requires a Python virtual environment with dependencies. After installation:
+
+```bash
+# Navigate to the plugin directory (adjust version number as needed)
+cd ~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/$(ls ~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/ | sort -V | tail -1)
+
+# Create venv and install dependencies
+uv venv && uv sync
+```
+
+#### Step 3 (Optional): Enable rlm-core for Performance
+
+For 10-50x faster pattern classification:
+
+```bash
+# First, build rlm-core if you haven't already (see "Building rlm-core" section above)
+
+# Get the plugin version directory
+PLUGIN_DIR=~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/$(ls ~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/ | sort -V | tail -1)
+
+# Link rlm_core to the plugin's venv
+echo "$HOME/src/loop/rlm-core/python" > "$PLUGIN_DIR/.venv/lib/python3.12/site-packages/rlm_core.pth"
+
+# Verify it works
+"$PLUGIN_DIR/.venv/bin/python" -c "import rlm_core; print('rlm_core OK:', rlm_core.PatternClassifier)"
+
+# Enable rlm-core by default (add to your config)
+cat > ~/.claude/rlm-config.json << 'EOF'
+{
+  "use_rlm_core": true,
+  "activation": {
+    "mode": "complexity",
+    "fallback_token_threshold": 80000
+  },
+  "depth": {
+    "default": 2,
+    "max": 3
+  },
+  "trajectory": {
+    "verbosity": "normal",
+    "streaming": true
+  }
+}
+EOF
+```
+
+#### Step 4: Verify Installation
+
+Restart Claude Code. You should see "RLM initialized" on startup.
+
+Test the hooks manually:
+```bash
+PLUGIN_DIR=~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/$(ls ~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/ | sort -V | tail -1)
+"$PLUGIN_DIR/.venv/bin/python" "$PLUGIN_DIR/scripts/init_rlm.py"
+# Should print: RLM initialized
+```
+
+#### Updating the Plugin
+
+When updating, you'll need to re-create the venv:
+
+```bash
+claude plugin update rlm-claude-code@rlm-claude-code
+
+# Re-setup the new version
+PLUGIN_DIR=~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/$(ls ~/.claude/plugins/cache/rlm-claude-code/rlm-claude-code/ | sort -V | tail -1)
+cd "$PLUGIN_DIR" && uv venv && uv sync
+
+# Re-link rlm_core if using it
+echo "$HOME/src/loop/rlm-core/python" > "$PLUGIN_DIR/.venv/lib/python3.12/site-packages/rlm_core.pth"
+```
 
 ---
 
