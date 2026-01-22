@@ -361,6 +361,7 @@ Persistent storage for cross-session learning:
 
 - **Node Types**: facts, experiences, procedures, goals
 - **Memory Tiers**: task → session → longterm → archive
+- **Session Isolation**: task/session tiers are isolated per terminal; longterm/archive shared (see [docs/session-isolation.md](docs/session-isolation.md))
 - **Hyperedges**: N-ary relationships with typed roles
 - **Storage**: SQLite with WAL mode for concurrent access
 
