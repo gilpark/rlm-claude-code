@@ -1,8 +1,8 @@
-# RLM-Claude-Code (rlm-core branch)
+# RLM-Claude-Code
 
 Transform Claude Code into a Recursive Language Model (RLM) agent with intelligent orchestration, unbounded context handling, persistent memory, and REPL-based decomposition.
 
-**Branch: `rlm-core-migration`** - This branch uses [rlm-core](https://github.com/rand/loop) as the unified RLM orchestration library, providing shared implementations with [recurse](https://github.com/rand/recurse).
+**rlm-core integration**: This project optionally uses [rlm-core](https://github.com/rand/loop) as the unified RLM orchestration library, providing shared implementations with [recurse](https://github.com/rand/recurse). When rlm-core is installed and `RLM_USE_CORE=true`, Rust-based pattern classification offers 10-50x faster performance. Falls back to Python when unavailable.
 
 ## What is RLM?
 
@@ -22,41 +22,48 @@ This results in better accuracy on complex tasks while optimizing cost through i
 
 ### Prerequisites
 
-- **Python 3.11+**: `brew install python@3.11` or [python.org](https://python.org)
-- **Rust 1.75+**: `rustup update stable` (for building rlm-core)
+- **Python 3.12+**: `brew install python@3.12` or [python.org](https://python.org)
 - **uv** (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- **maturin**: Installed via uv as a dev dependency
+- **Rust 1.75+** (optional): `rustup update stable` (only if building rlm-core)
 
-### Building rlm-core (Required)
+### Installation
 
-This branch requires the [rlm-core](https://github.com/rand/loop) Python bindings:
+```bash
+# Clone the repository
+git clone https://github.com/rand/rlm-claude-code.git
+cd rlm-claude-code
+
+# Install dependencies
+uv sync --all-extras
+
+# Run tests to verify setup
+uv run pytest tests/ -v
+```
+
+### Optional: Building rlm-core for Performance
+
+For 10-50x faster pattern classification, install the [rlm-core](https://github.com/rand/loop) Python bindings:
 
 ```bash
 # Clone rlm-core (if not already present)
 git clone https://github.com/rand/loop.git ~/src/loop
 
 # Build and install the Python bindings
-cd ~/src/loop/rlm-core/python
-uv sync
-uv run maturin develop --release
+cd ~/src/loop/rlm-core
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 uv run maturin develop --release
+
+# Add to your project's venv
+echo "~/src/loop/rlm-core/python" > /path/to/rlm-claude-code/.venv/lib/python3.12/site-packages/rlm_core.pth
 
 # Verify rlm_core is importable
+cd /path/to/rlm-claude-code
 uv run python -c "import rlm_core; print(rlm_core.PatternClassifier)"
+
+# Enable rlm-core (set in environment or shell)
+export RLM_USE_CORE=true
 ```
 
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/rand/rlm-claude-code.git -b rlm-core-migration
-cd rlm-claude-code
-
-# Install dependencies (including rlm-core from local build)
-uv sync --all-extras
-
-# Run tests to verify setup
-uv run pytest tests/ -v
-```
+Without rlm-core, all functionality works using Python fallback implementations.
 
 ### As a Claude Code Plugin
 
@@ -146,38 +153,49 @@ Final Answer
 
 ---
 
-## rlm-core Integration
+## rlm-core Integration (Optional)
 
-This branch replaces the Python-native RLM implementation with bindings to the unified [rlm-core](https://github.com/rand/loop) Rust library.
+RLM-Claude-Code optionally integrates with the [rlm-core](https://github.com/rand/loop) Rust library for improved performance. This is controlled by the `RLM_USE_CORE` environment variable.
 
-### What's Different from Mainline
+### Feature Flag
 
-| Component | Mainline | rlm-core Branch |
-|-----------|----------|-----------------|
-| Pattern Classifier | Python regex | Rust via PyO3 (10x faster) |
-| Memory Store | Python + SQLite | Rust + SQLite via PyO3 |
+| `RLM_USE_CORE` | Behavior |
+|----------------|----------|
+| `true` | Use rlm-core Rust bindings (requires installation) |
+| `false` or unset | Use Python fallback (default, always works) |
+
+When `RLM_USE_CORE=true` but rlm-core is not installed, a warning is logged and Python fallback is used.
+
+### Performance Comparison
+
+| Component | Python Fallback | With rlm-core |
+|-----------|-----------------|---------------|
+| Pattern Classifier | Python regex | Rust via PyO3 (10-50x faster) |
 | Trajectory Events | Python classes | Rust types via PyO3 |
-| REPL Sandbox | RestrictedPython | RestrictedPython (unchanged) |
+| Memory Store | Python + SQLite | Python + SQLite (rlm-core memory disabled*) |
 
-### Benefits
+*rlm-core memory store integration is disabled pending feature parity (metadata, FTS5 search).
+
+### Benefits of rlm-core
 
 - **Consistency**: Same classification logic as recurse TUI
-- **Performance**: Rust pattern matching is 10-50x faster
-- **Shared Memory**: Same hypergraph schema across tools
-- **Single Source**: Bug fixes benefit both projects
+- **Performance**: Rust pattern matching is significantly faster
+- **Shared Codebase**: Bug fixes benefit both projects
 
 ### Python Bindings Usage
 
 ```python
-from rlm_core import SessionContext, PatternClassifier, MemoryStore
+import os
+os.environ["RLM_USE_CORE"] = "true"
 
-# The bridge code in src/complexity_classifier.py auto-converts types
-ctx = SessionContext()
-ctx.add_user_message("Find security vulnerabilities")
+from src.complexity_classifier import should_activate_rlm, extract_complexity_signals
+from src.types import SessionContext, Message, MessageRole
 
-classifier = PatternClassifier()
-decision = classifier.should_activate("Find vulnerabilities", ctx)
-# Returns: ActivationDecision(should_activate=True, reason="security_review")
+# The bridge code auto-converts types and delegates to rlm_core when available
+ctx = SessionContext(messages=[Message(role=MessageRole.USER, content="test")])
+signals = extract_complexity_signals("Find security vulnerabilities", ctx)
+activate, reason = should_activate_rlm("Find security vulnerabilities", ctx)
+# Returns: (True, "complexity_score:2:cross_context+pattern_search")
 ```
 
 ---
@@ -385,6 +403,7 @@ RLM stores configuration at `~/.claude/rlm-config.json`:
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic API access (uses Claude Code's key) |
 | `OPENAI_API_KEY` | OpenAI API access (optional, for GPT models) |
+| `RLM_USE_CORE` | Enable rlm-core Rust bindings (`true`/`false`) |
 | `RLM_CONFIG_PATH` | Custom config file location |
 | `RLM_DEBUG` | Enable debug logging |
 
