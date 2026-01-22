@@ -1,6 +1,8 @@
-# RLM-Claude-Code
+# RLM-Claude-Code (rlm-core branch)
 
 Transform Claude Code into a Recursive Language Model (RLM) agent with intelligent orchestration, unbounded context handling, persistent memory, and REPL-based decomposition.
+
+**Branch: `rlm-core-migration`** - This branch uses [rlm-core](https://github.com/rand/loop) as the unified RLM orchestration library, providing shared implementations with [recurse](https://github.com/rand/recurse).
 
 ## What is RLM?
 
@@ -18,12 +20,38 @@ This results in better accuracy on complex tasks while optimizing cost through i
 
 ## Quick Start
 
+### Prerequisites
+
+- **Python 3.11+**: `brew install python@3.11` or [python.org](https://python.org)
+- **Rust 1.75+**: `rustup update stable` (for building rlm-core)
+- **uv** (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **maturin**: Installed via uv as a dev dependency
+
+### Building rlm-core (Required)
+
+This branch requires the [rlm-core](https://github.com/rand/loop) Python bindings:
+
+```bash
+# Clone rlm-core (if not already present)
+git clone https://github.com/rand/loop.git ~/src/loop
+
+# Build and install the Python bindings
+cd ~/src/loop/rlm-core/python
+uv sync
+uv run maturin develop --release
+
+# Verify rlm_core is importable
+uv run python -c "import rlm_core; print(rlm_core.PatternClassifier)"
+```
+
+### Installation
+
 ```bash
 # Clone the repository
-git clone https://github.com/rand/rlm-claude-code.git
+git clone https://github.com/rand/rlm-claude-code.git -b rlm-core-migration
 cd rlm-claude-code
 
-# Install dependencies
+# Install dependencies (including rlm-core from local build)
 uv sync --all-extras
 
 # Run tests to verify setup
@@ -114,6 +142,42 @@ User Query
     │
     ▼
 Final Answer
+```
+
+---
+
+## rlm-core Integration
+
+This branch replaces the Python-native RLM implementation with bindings to the unified [rlm-core](https://github.com/rand/loop) Rust library.
+
+### What's Different from Mainline
+
+| Component | Mainline | rlm-core Branch |
+|-----------|----------|-----------------|
+| Pattern Classifier | Python regex | Rust via PyO3 (10x faster) |
+| Memory Store | Python + SQLite | Rust + SQLite via PyO3 |
+| Trajectory Events | Python classes | Rust types via PyO3 |
+| REPL Sandbox | RestrictedPython | RestrictedPython (unchanged) |
+
+### Benefits
+
+- **Consistency**: Same classification logic as recurse TUI
+- **Performance**: Rust pattern matching is 10-50x faster
+- **Shared Memory**: Same hypergraph schema across tools
+- **Single Source**: Bug fixes benefit both projects
+
+### Python Bindings Usage
+
+```python
+from rlm_core import SessionContext, PatternClassifier, MemoryStore
+
+# The bridge code in src/complexity_classifier.py auto-converts types
+ctx = SessionContext()
+ctx.add_user_message("Find security vulnerabilities")
+
+classifier = PatternClassifier()
+decision = classifier.should_activate("Find vulnerabilities", ctx)
+# Returns: ActivationDecision(should_activate=True, reason="security_review")
 ```
 
 ---

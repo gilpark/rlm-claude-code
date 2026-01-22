@@ -24,6 +24,8 @@ from src.epistemic.claim_extractor import (
     ExtractedClaim,
     ExtractionResult,
     extract_evidence_references,
+    quick_extract_claims,
+    quick_hallucination_score,
 )
 from src.epistemic.consistency_checker import (
     ConsistencyChecker,
@@ -93,6 +95,8 @@ __all__ = [
     "ExtractedClaim",
     "ExtractionResult",
     "extract_evidence_references",
+    "quick_extract_claims",
+    "quick_hallucination_score",
     # Evidence auditing
     "EvidenceAuditor",
     "AuditResult",

@@ -2,12 +2,58 @@
 Task complexity classification for RLM activation.
 
 Implements: Spec §6.3 Task Complexity-Based Activation
+
+Migration: When USE_RLM_CORE=true, delegates to rlm_core.PatternClassifier
 """
 
 import re
 from pathlib import Path
 
+from .config import USE_RLM_CORE
 from .types import MessageRole, SessionContext, TaskComplexitySignals
+
+# Conditional import of rlm_core bindings
+_rlm_core = None
+if USE_RLM_CORE:
+    try:
+        import rlm_core as _rlm_core
+    except ImportError:
+        import warnings
+        warnings.warn(
+            "RLM_USE_CORE=true but rlm_core not installed. "
+            "Falling back to Python implementation."
+        )
+        _rlm_core = None
+
+
+def _convert_to_rlm_core_context(context: SessionContext) -> "_rlm_core.SessionContext":
+    """
+    Convert Python SessionContext to rlm_core.SessionContext.
+
+    This adapter bridges the Python implementation types to the Rust bindings.
+    """
+    if _rlm_core is None:
+        raise RuntimeError("rlm_core not available")
+
+    core_ctx = _rlm_core.SessionContext()
+
+    # Convert messages
+    for msg in context.messages:
+        if msg.role == MessageRole.USER:
+            core_ctx.add_user_message(msg.content)
+        elif msg.role == MessageRole.ASSISTANT:
+            core_ctx.add_assistant_message(msg.content)
+
+    # Convert tool outputs
+    for output in context.tool_outputs:
+        core_output = _rlm_core.ToolOutput(output.tool_name, output.content)
+        core_ctx.add_tool_output(core_output)
+
+    # Cache files
+    for file_path, content in context.files.items():
+        core_ctx.cache_file(file_path, content)
+
+    return core_ctx
 
 
 def _detect_state_changes(context: SessionContext) -> bool:
@@ -191,6 +237,37 @@ def extract_complexity_signals(prompt: str, context: SessionContext) -> TaskComp
     )
 
 
+# Singleton classifier for rlm_core (lazy initialized)
+_rlm_core_classifier = None
+
+
+def _get_rlm_core_classifier() -> "_rlm_core.PatternClassifier":
+    """Get or create the rlm_core PatternClassifier singleton."""
+    global _rlm_core_classifier
+    if _rlm_core_classifier is None and _rlm_core is not None:
+        _rlm_core_classifier = _rlm_core.PatternClassifier()
+    return _rlm_core_classifier
+
+
+def _should_activate_rlm_core(prompt: str, context: SessionContext) -> tuple[bool, str]:
+    """
+    Delegate activation decision to rlm_core.PatternClassifier.
+
+    This provides consistent behavior with the Go/Rust implementations.
+    """
+    classifier = _get_rlm_core_classifier()
+    if classifier is None:
+        raise RuntimeError("rlm_core classifier not available")
+
+    # Convert context to rlm_core format
+    core_ctx = _convert_to_rlm_core_context(context)
+
+    # Get activation decision from rlm_core
+    decision = classifier.should_activate(prompt, core_ctx)
+
+    return decision.should_activate, decision.reason
+
+
 def should_activate_rlm(
     prompt: str,
     context: SessionContext,
@@ -204,15 +281,23 @@ def should_activate_rlm(
 
     Biased toward activation—when in doubt, use RLM.
 
+    When USE_RLM_CORE=true, delegates to rlm_core.PatternClassifier for
+    consistent behavior across Python and Go implementations.
+
     Returns:
         (should_activate, reason) tuple
     """
-    # Manual overrides
+    # Manual overrides (handled before delegation)
     if rlm_mode_forced:
         return True, "manual_override"
     if simple_mode_forced:
         return False, "simple_mode_forced"
 
+    # Delegate to rlm_core when available
+    if _rlm_core is not None:
+        return _should_activate_rlm_core(prompt, context)
+
+    # Fall back to Python implementation
     signals = extract_complexity_signals(prompt, context)
 
     # High-signal indicators (each sufficient alone)

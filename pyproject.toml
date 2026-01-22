@@ -35,6 +35,11 @@ local = [
     "sentence-transformers>=2.0.0",  # SetFit dependency
     "gliner>=0.2.0",  # Entity/signal extraction for complexity detection
 ]
+rlm-core = [
+    # rlm-core Python bindings - build from ~/src/loop/rlm-core
+    # Install with: pip install -e ~/src/loop/rlm-core --features python
+    # Or: maturin develop --features python (from rlm-core directory)
+]
 
 [build-system]
 requires = ["hatchling"]

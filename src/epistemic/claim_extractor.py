@@ -6,6 +6,9 @@ Implements: SPEC-16.06 Claim extraction via Claude
 Extracts atomic, verifiable claims from LLM responses and maps them
 to cited evidence spans. Uses Claude to decompose complex statements
 into individually verifiable units.
+
+When rlm_core is available, provides fast pattern-based extraction
+via quick_extract_claims() as a complement to LLM-based extraction.
 """
 
 from __future__ import annotations
@@ -14,10 +17,83 @@ import json
 import re
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+from src.config import USE_RLM_CORE
 
 if TYPE_CHECKING:
     from src.api_client import APIResponse
+
+# ============================================================================
+# rlm_core Integration (Phase 6 Migration)
+# ============================================================================
+
+# Conditional import of rlm_core bindings
+_rlm_core = None
+if USE_RLM_CORE:
+    try:
+        import rlm_core as _rlm_core
+    except ImportError:
+        import warnings
+
+        warnings.warn(
+            "RLM_USE_CORE=true but rlm_core not installed. "
+            "Falling back to Python implementation."
+        )
+        _rlm_core = None
+
+
+def _rlm_core_available() -> bool:
+    """Check if rlm_core is available."""
+    return _rlm_core is not None
+
+
+def quick_hallucination_score(text: str) -> float | None:
+    """
+    Quick hallucination risk score using rlm_core.
+
+    Returns a float between 0.0 and 1.0 indicating hallucination risk,
+    or None if rlm_core is not available.
+
+    Args:
+        text: Text to check for hallucination risk
+
+    Returns:
+        Risk score (0.0 = low risk, 1.0 = high risk) or None
+    """
+    if _rlm_core is None:
+        return None
+    try:
+        return _rlm_core.quick_hallucination_check(text)
+    except Exception:
+        return None
+
+
+def _map_core_category_to_metadata(category: Any) -> dict[str, str]:
+    """Map rlm_core.ClaimCategory to metadata dict."""
+    if _rlm_core is None:
+        return {}
+
+    # Convert category to string for comparison (enum may not be hashable)
+    category_str = str(category)
+
+    # Map by string representation
+    if "CodeBehavior" in category_str:
+        return {"category": "code_behavior"}
+    elif "Factual" in category_str:
+        return {"category": "factual"}
+    elif "Numerical" in category_str:
+        return {"category": "numerical"}
+    elif "Temporal" in category_str:
+        return {"category": "temporal"}
+    elif "Relational" in category_str:
+        return {"category": "relational"}
+    elif "UserIntent" in category_str:
+        return {"category": "user_intent"}
+    elif "MetaReasoning" in category_str:
+        return {"category": "meta_reasoning"}
+    else:
+        return {"category": "unknown"}
 
 
 class LLMClient(Protocol):
@@ -75,6 +151,63 @@ class ExtractionResult:
     response_id: str
     total_spans: int = 0
     extraction_model: str = "haiku"
+
+
+# ============================================================================
+# Quick Extraction via rlm_core
+# ============================================================================
+
+
+def quick_extract_claims(
+    text: str,
+    response_id: str | None = None,
+) -> ExtractionResult | None:
+    """
+    Fast pattern-based claim extraction using rlm_core.
+
+    This is a quick, non-LLM extraction that uses pattern matching
+    and heuristics. Use for pre-filtering or when LLM extraction
+    is too slow/expensive.
+
+    Args:
+        text: Text to extract claims from
+        response_id: Optional ID for the response
+
+    Returns:
+        ExtractionResult with extracted claims, or None if rlm_core unavailable
+    """
+    if _rlm_core is None:
+        return None
+
+    response_id = response_id or str(uuid.uuid4())[:8]
+
+    try:
+        extractor = _rlm_core.ClaimExtractor()
+        core_claims = extractor.extract(text)
+
+        claims = []
+        for i, cc in enumerate(core_claims):
+            claims.append(
+                ExtractedClaim(
+                    claim_id=cc.id if hasattr(cc, "id") else f"{response_id}-c{i}",
+                    claim_text=cc.text,
+                    original_span=cc.text,  # Core doesn't track original span
+                    evidence_ids=[],  # Core doesn't track evidence refs
+                    confidence=cc.specificity if hasattr(cc, "specificity") else 0.8,
+                    is_critical=False,  # Core doesn't determine criticality
+                    metadata=_map_core_category_to_metadata(cc.category),
+                )
+            )
+
+        return ExtractionResult(
+            claims=claims,
+            response_id=response_id,
+            total_spans=len(claims),
+            extraction_model="rlm_core",
+        )
+
+    except Exception:
+        return None
 
 
 # Prompts for claim extraction
@@ -181,6 +314,31 @@ class ClaimExtractor:
         self.client = client
         self.default_model = default_model
         self.max_claims = max_claims
+
+    @property
+    def uses_rlm_core(self) -> bool:
+        """Return True if rlm_core is available for quick extraction."""
+        return _rlm_core_available()
+
+    def quick_extract(
+        self,
+        text: str,
+        response_id: str | None = None,
+    ) -> ExtractionResult | None:
+        """
+        Fast pattern-based extraction using rlm_core.
+
+        This is a convenience method that wraps quick_extract_claims().
+        Use for pre-filtering before expensive LLM extraction.
+
+        Args:
+            text: Text to extract claims from
+            response_id: Optional ID for the response
+
+        Returns:
+            ExtractionResult or None if rlm_core unavailable
+        """
+        return quick_extract_claims(text, response_id)
 
     async def extract_claims(
         self,

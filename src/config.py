@@ -5,9 +5,14 @@ Implements: Spec §5.3 Router Configuration
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
+
+# Feature flag for rlm-core migration
+# Set RLM_USE_CORE=true to use rlm-core Rust bindings instead of Python implementations
+USE_RLM_CORE = os.getenv("RLM_USE_CORE", "false").lower() == "true"
 
 if TYPE_CHECKING:
     from .epistemic.types import VerificationConfig as VerificationConfigType
