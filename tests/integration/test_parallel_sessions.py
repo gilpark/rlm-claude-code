@@ -5,7 +5,21 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from src.memory_store import MemoryStore
 
+# Check if rlm_core is available (affects which features work)
+try:
+    import rlm_core
+    HAS_RLM_CORE = True
+except ImportError:
+    HAS_RLM_CORE = False
 
+# Skip tests that require Python backend features (metadata, session isolation)
+requires_python_backend = pytest.mark.skipif(
+    HAS_RLM_CORE,
+    reason="Test requires Python backend (metadata support not available in rlm_core)",
+)
+
+
+@requires_python_backend
 class TestParallelSessions:
     """Test isolation when multiple sessions run concurrently."""
 
@@ -170,6 +184,7 @@ class TestParallelSessions:
         assert len(errors) == 0, f"Mixed tier errors: {errors}"
 
 
+@requires_python_backend
 class TestCrossContaminationPrevention:
     """Focused tests on preventing cross-contamination between sessions."""
 

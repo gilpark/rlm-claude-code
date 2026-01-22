@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS nodes (
 -- Hyperedges table
 CREATE TABLE IF NOT EXISTS hyperedges (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL CHECK(type IN ('relation', 'composition', 'causation', 'context')),
+    edge_type TEXT NOT NULL CHECK(edge_type IN ('relation', 'composition', 'causation', 'context')),
     label TEXT,
     weight REAL DEFAULT 1.0 CHECK(weight >= 0.0)
 );
@@ -488,6 +488,7 @@ class MemoryStore:
             raise ValueError(f"Confidence must be between 0.0 and 1.0, got: {confidence}")
 
         # Delegate to rlm_core if available
+        # Note: rlm_core doesn't support metadata, subtype, confidence, provenance, embedding yet
         if self._core_store is not None:
             return self._create_node_core(
                 node_type=node_type,
@@ -809,7 +810,7 @@ class MemoryStore:
         try:
             # Create edge
             conn.execute(
-                "INSERT INTO hyperedges (id, type, label, weight) VALUES (?, ?, ?, ?)",
+                "INSERT INTO hyperedges (id, edge_type, label, weight) VALUES (?, ?, ?, ?)",
                 (edge_id, edge_type, label, weight),
             )
 
@@ -1267,7 +1268,7 @@ class MemoryStore:
                     JOIN membership m2 ON m1.hyperedge_id = m2.hyperedge_id
                     JOIN hyperedges h ON m1.hyperedge_id = h.id
                     WHERE m2.node_id = ? AND n.id != ? AND n.tier != 'archive'
-                    AND h.type = ?
+                    AND h.edge_type = ?
                 """
                 values.append(edge_type)
 
