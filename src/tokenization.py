@@ -478,6 +478,13 @@ def partition_content_by_tokens(content: str, n_chunks: int) -> list[str]:
     if total_tokens == 0:
         return [content]
 
+    # For very small content, don't over-partition.
+    # If we have fewer tokens than requested chunks, or if partitioning would
+    # create chunks smaller than 2 tokens each, just return the content as-is.
+    # This prevents content loss from whitespace filtering in token_aware_chunk.
+    if total_tokens < n_chunks * 2:
+        return [content]
+
     # Calculate target tokens per chunk using ceiling division
     # This ensures we don't create more than n_chunks
     tokens_per_chunk = -(-total_tokens // n_chunks)  # Ceiling division
