@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rlm/trajectory-event.json",
+  "title": "TrajectoryEvent",
+  "allOf": [
+    { "$ref": "../event-base.json" },
+    {
+      "type": "object",
+      "required": ["type", "event_type"],
+      "properties": {
+        "type": { "const": "trajectory_event" },
+        "event_type": { "enum": ["query_start", "context_externalized", "repl_execution", "sub_query", "tool_use", "model_selected", "final_answer", "error"] },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "payload": { "type": "object" }
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "name": "rlm-claude-code",
-  "description": "Marketplace for RLM-Claude-Code: Recursive Language Model with intelligent multi-provider routing",
+  "description": "Marketplace for RLM-Claude-Code: Recursive Language Model with Go hook binaries, cross-plugin event system, and intelligent multi-provider routing",
   "owner": {
     "name": "rand",
     "url": "https://github.com/rand"
@@ -9,8 +9,8 @@
     {
       "name": "rlm-claude-code",
       "source": "./",
-      "description": "Recursive Language Model integration for Claude Code - intelligent multi-provider routing and unbounded context handling",
-      "version": "0.5.0"
+      "description": "Recursive Language Model integration for Claude Code - Go binary hooks (~5ms startup), cross-plugin event coordination (DP/RLM), version-aware config migration, and intelligent multi-provider routing",
+      "version": "0.6.0"
     }
   ]
 }
