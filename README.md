@@ -525,7 +525,39 @@ RLM stores configuration at `~/.claude/rlm-config.json`:
 
 ## Hooks
 
-RLM integrates with Claude Code via hooks:
+### Go Binary Hooks (v0.6.0+)
+
+As of v0.6.0, RLM uses compiled Go binaries for hook execution, reducing startup latency from ~500ms (Python) to ~5ms. The three primary hooks are:
+
+| Hook | Binary | Purpose |
+|------|--------|---------|
+| `SessionStart` | `session-init` | Initialize RLM environment, emit `session.started` event |
+| `UserPromptSubmit` | `complexity-check` | Decide if RLM should activate, responds to DP phases |
+| `Stop` | `trajectory-save` | Save trajectory and emit `session.ended` event |
+
+Prompt-based hooks (no binary needed) handle context sync, output capture, and pre-compaction.
+
+#### Cross-Plugin Event System
+
+Hooks emit and consume events via `~/.claude/events/`, enabling coordination between plugins (e.g., DP and RLM). All event types have JSON Schema definitions. Python helpers in `src/events/` provide emit/consume APIs.
+
+#### Config Migration
+
+v0.6.0 introduces a V2 config format. Existing V1 configs are automatically migrated on first run, preserving user customizations.
+
+#### Legacy Fallback
+
+To use the original Python hook scripts:
+
+```bash
+export RLM_USE_LEGACY_HOOKS=1
+```
+
+Legacy scripts are located in `scripts/legacy/`.
+
+### Legacy Hook Reference
+
+The original Python hooks (now in `scripts/legacy/`):
 
 | Hook | Script | Purpose |
 |------|--------|---------|
