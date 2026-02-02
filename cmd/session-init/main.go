@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/rand/rlm-claude-code/internal/config"
 	"github.com/rand/rlm-claude-code/internal/events"
 	"github.com/rand/rlm-claude-code/internal/hookio"
 )
@@ -34,6 +35,15 @@ func main() {
 	// Fast path: already initialized
 	if _, err := os.Stat(markerFile); err == nil {
 		hookio.Debug("Already initialized, fast path")
+
+		// Load config (handles migration)
+		cfg, err := config.Load()
+		if err != nil {
+			hookio.Debug("Config load error: %v", err)
+		} else {
+			hookio.Debug("Config loaded: version=%s, mode=%s", cfg.Version, cfg.Activation.Mode)
+		}
+
 		writeEnvFile(venvPath)
 
 		// Check DP phase for mode suggestion
@@ -76,6 +86,14 @@ func main() {
 	// Create marker file
 	os.MkdirAll(filepath.Dir(markerFile), 0755)
 	os.WriteFile(markerFile, []byte(time.Now().Format(time.RFC3339)), 0644)
+
+	// Load config (handles migration)
+	cfg, err := config.Load()
+	if err != nil {
+		hookio.Debug("Config load error: %v", err)
+	} else {
+		hookio.Debug("Config loaded: version=%s, mode=%s", cfg.Version, cfg.Activation.Mode)
+	}
 
 	// Write to CLAUDE_ENV_FILE
 	writeEnvFile(venvPath)

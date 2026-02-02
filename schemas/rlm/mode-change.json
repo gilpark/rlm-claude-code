@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rlm/mode-change.json",
+  "title": "ModeChangeEvent",
+  "allOf": [
+    { "$ref": "../event-base.json" },
+    {
+      "type": "object",
+      "required": ["type", "from_mode", "to_mode", "reason"],
+      "properties": {
+        "type": { "const": "mode_change" },
+        "from_mode": { "enum": ["off", "micro", "fast", "balanced", "thorough"] },
+        "to_mode": { "enum": ["off", "micro", "fast", "balanced", "thorough"] },
+        "reason": { "type": "string" },
+        "triggered_by": { "enum": ["user", "auto_activation", "dp_phase", "complexity"] }
+      }
+    }
+  ]
+}

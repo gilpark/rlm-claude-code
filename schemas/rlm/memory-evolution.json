@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rlm/memory-evolution.json",
+  "title": "MemoryEvolutionEvent",
+  "allOf": [
+    { "$ref": "../event-base.json" },
+    {
+      "type": "object",
+      "required": ["type", "action"],
+      "properties": {
+        "type": { "const": "memory_evolution" },
+        "action": { "enum": ["stored", "promoted", "decayed", "consolidated", "retrieved"] },
+        "node_id": { "type": "string" },
+        "from_tier": { "enum": ["working", "task", "session", "longterm", "archive"] },
+        "to_tier": { "enum": ["working", "task", "session", "longterm", "archive"] },
+        "content_summary": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  ]
+}
