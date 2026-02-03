@@ -1,11 +1,11 @@
-// Command complexity-check evaluates whether RLM should activate based on context complexity.
+// Command complexity-check evaluates whether RLM should activate based on prompt complexity.
 package main
 
 import (
 	"fmt"
 	"os"
-	"strconv"
 
+	"github.com/rand/rlm-claude-code/internal/classify"
 	"github.com/rand/rlm-claude-code/internal/events"
 	"github.com/rand/rlm-claude-code/internal/hookio"
 )
@@ -17,42 +17,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	hookio.Debug("Complexity check: tool=%s", input.ToolName)
-
-	threshold := 80000
-	if env := os.Getenv("RLM_TOKEN_THRESHOLD"); env != "" {
-		if t, err := strconv.Atoi(env); err == nil {
-			threshold = t
-		}
-	}
-
 	if os.Getenv("RLM_DISABLED") == "1" {
 		hookio.Approve("")
 		return
 	}
 
-	dpPhase := events.GetDPPhase()
-	hookio.Debug("DP phase: %s", dpPhase)
+	prompt := input.UserPrompt
+	hookio.Debug("Complexity check: prompt length=%d", len(prompt))
 
-	shouldActivate := false
-	reason := ""
-
-	suggestedMode := events.SuggestedRLMMode()
-	if suggestedMode != "" {
-		shouldActivate = true
-		reason = fmt.Sprintf("DP phase %s: RLM %s mode recommended", dpPhase, suggestedMode)
+	// Skip if trivial rigor
+	rigor := events.GetDPRigor()
+	if rigor == "trivial" {
+		hookio.Approve("")
+		return
 	}
 
-	if shouldActivate {
-		hookio.Approve(reason)
+	// Fast-path bypass for trivial prompts
+	if classify.IsFastPath(prompt) {
+		hookio.Debug("Fast-path bypass")
+		hookio.Approve("")
+		return
+	}
+
+	dpPhase := events.GetDPPhase()
+	hookio.Debug("DP phase: %s, rigor: %s", dpPhase, rigor)
+
+	activate, reason, mode := classify.ShouldActivate(prompt, dpPhase, rigor)
+
+	if activate {
+		msg := fmt.Sprintf("[RLM %s mode: %s]", mode, reason)
+		hookio.Debug("Activating: %s", msg)
+		hookio.Approve(msg)
 		events.Emit(map[string]any{
-			"type":      "rlm_activation_suggested",
-			"source":    "rlm-claude-code",
-			"dp_phase":  dpPhase,
-			"reason":    reason,
-			"threshold": threshold,
+			"type":     "rlm_activation_suggested",
+			"source":   "rlm-claude-code",
+			"dp_phase": dpPhase,
+			"reason":   reason,
+			"mode":     mode,
 		}, "rlm-claude-code")
 	} else {
+		hookio.Debug("No activation: %s", reason)
 		hookio.Approve("")
 	}
 }

@@ -124,6 +124,18 @@ func GetRLMMode() string {
 	return "unknown"
 }
 
+// GetDPRigor returns the current disciplined-process rigor level, or "".
+func GetDPRigor() string {
+	event, err := ReadLatest("disciplined-process")
+	if err != nil {
+		return ""
+	}
+	if rigor, ok := event["rigor"].(string); ok {
+		return rigor
+	}
+	return ""
+}
+
 // --- Helper for DP → RLM coordination ---
 
 // SuggestedRLMMode returns the suggested RLM mode based on DP phase.

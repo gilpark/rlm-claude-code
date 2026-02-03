@@ -10,6 +10,7 @@ query intent classification and task-specific gathering strategies.
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -296,10 +297,28 @@ class CodeTaskEnricher:
             file_path: Path to file
 
         Returns:
-            List of recent changes (mock implementation)
+            List of recent change dicts with keys: hash, author, date, message.
         """
-        # Mock implementation - in production, use git log
-        return []
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "--format=%H|%an|%ai|%s", "-10", "--", file_path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return []
+            changes = []
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("|", 3)
+                if len(parts) == 4:
+                    changes.append({
+                        "hash": parts[0],
+                        "author": parts[1],
+                        "date": parts[2],
+                        "message": parts[3],
+                    })
+            return changes
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return []
 
 
 class DebugTaskEnricher:
@@ -363,15 +382,25 @@ class DebugTaskEnricher:
             line: Line number
 
         Returns:
-            Blame information (mock implementation)
+            Blame information with keys: file, line, author, commit.
         """
-        # Mock implementation - in production, use git blame
-        return {
-            "file": file_path,
-            "line": line,
-            "author": "unknown",
-            "commit": "unknown",
-        }
+        try:
+            result = subprocess.run(
+                ["git", "blame", "-L", f"{line},{line}", "--porcelain", file_path],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return {"file": file_path, "line": line, "author": "unknown", "commit": "unknown"}
+            commit = "unknown"
+            author = "unknown"
+            for bl in result.stdout.splitlines():
+                if bl.startswith("author "):
+                    author = bl[7:]
+                elif not bl.startswith("\t") and len(bl) >= 40 and bl[:40].isalnum():
+                    commit = bl.split()[0]
+            return {"file": file_path, "line": line, "author": author, "commit": commit}
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return {"file": file_path, "line": line, "author": "unknown", "commit": "unknown"}
 
     def find_similar_experiences(
         self,
@@ -388,9 +417,9 @@ class DebugTaskEnricher:
             context: Error context
 
         Returns:
-            List of similar experiences (mock implementation)
+            List of similar experiences. Returns empty until MemoryStore integration.
         """
-        # Mock implementation - in production, query memory store
+        # Requires MemoryStore instance — deferred until enricher accepts store dependency
         return []
 
 

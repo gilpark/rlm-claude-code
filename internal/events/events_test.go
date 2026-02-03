@@ -139,6 +139,34 @@ func TestSuggestedRLMModeMapping(t *testing.T) {
 	}
 }
 
+func TestGetDPRigorEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	os.MkdirAll(filepath.Join(tmpDir, ".claude", "events"), 0755)
+
+	rigor := GetDPRigor()
+	if rigor != "" {
+		t.Errorf("GetDPRigor = %q, want empty string", rigor)
+	}
+}
+
+func TestGetDPRigorFromEvent(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	evDir := filepath.Join(tmpDir, ".claude", "events")
+	os.MkdirAll(evDir, 0755)
+
+	Emit(map[string]any{
+		"type":  "phase_transition",
+		"rigor": "medium",
+	}, "disciplined-process")
+
+	rigor := GetDPRigor()
+	if rigor != "medium" {
+		t.Errorf("GetDPRigor = %q, want %q", rigor, "medium")
+	}
+}
+
 func TestEmitMultipleAppends(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
