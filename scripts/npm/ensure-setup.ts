@@ -117,20 +117,20 @@ function checkBinaries(): Status {
  * Returns: 'root' | 'vendor' | 'none'
  */
 function checkWheelLocation(): 'root' | 'vendor' | 'none' {
-  // Check root directory first
-  if (fs.existsSync(ROOT_DIR)) {
-    const rootFiles = fs.readdirSync(ROOT_DIR);
-    if (rootFiles.some(f => f.startsWith('rlm_claude_code') && f.endsWith('.whl'))) {
-      return 'root';
-    }
-  }
-
-  // Check vendor directory
+  // Check vendor directory (where maturin builds rlm_core wheel)
   const vendorWheelDir = path.join(ROOT_DIR, 'vendor/loop/rlm-core/target/wheels');
   if (fs.existsSync(vendorWheelDir)) {
     const vendorFiles = fs.readdirSync(vendorWheelDir);
-    if (vendorFiles.some(f => f.startsWith('rlm_claude_code') && f.endsWith('.whl'))) {
+    if (vendorFiles.some(f => f.startsWith('rlm_core') && f.endsWith('.whl'))) {
       return 'vendor';
+    }
+  }
+
+  // Check root directory
+  if (fs.existsSync(ROOT_DIR)) {
+    const rootFiles = fs.readdirSync(ROOT_DIR);
+    if (rootFiles.some(f => f.startsWith('rlm_core') && f.endsWith('.whl'))) {
+      return 'root';
     }
   }
 
@@ -219,12 +219,10 @@ function fixRlmCore(mode: InstallMode): boolean {
     }
   }
 
-  // Check for wheel files in various locations
-  // Priority: root (for marketplace) > vendor (for dev builds) > target
+  // Check for rlm_core wheel files in various locations
   const wheelLocations = [
-    ROOT_DIR,  // Root directory (for marketplace packages with bundled wheel)
-    path.join(ROOT_DIR, 'vendor/loop/rlm-core/target/wheels'),
-    path.join(ROOT_DIR, 'target/wheels'),
+    path.join(ROOT_DIR, 'vendor/loop/rlm-core/target/wheels'),  // Build location
+    ROOT_DIR,  // Root directory
   ];
 
   for (const location of wheelLocations) {
@@ -234,13 +232,14 @@ function fixRlmCore(mode: InstallMode): boolean {
     const files = isDir ? fs.readdirSync(location) : [path.basename(location)];
 
     for (const file of files) {
-      if (file.startsWith('rlm_claude_code') && file.endsWith('.whl')) {
+      // Look for rlm_core wheel (not rlm_claude_code)
+      if (file.startsWith('rlm_core') && file.endsWith('.whl')) {
         const wheelPath = isDir ? path.join(location, file) : location;
         log(`Found wheel: ${file}`, 'green');
 
         try {
-          runCommand(`uv pip install "${wheelPath}"`, { silent: false });
-          log('  [OK] Installed wheel', 'green');
+          runCommand(`uv pip install --force-reinstall "${wheelPath}"`, { silent: false });
+          log('  [OK] Installed rlm_core wheel', 'green');
           return true;
         } catch (error) {
           log(`  [FAIL] Could not install wheel: ${(error as Error).message}`, 'red');
@@ -250,7 +249,7 @@ function fixRlmCore(mode: InstallMode): boolean {
   }
 
   if (mode === 'dev') {
-    log('Dev mode: No local wheel found. Build from source instead.', 'yellow');
+    log('Dev mode: No rlm_core wheel found. Build from source.', 'yellow');
     log('  Run: npm run build -- --wheel-only', 'cyan');
     return false;
   }
@@ -262,11 +261,11 @@ function fixRlmCore(mode: InstallMode): boolean {
 
     // Find and install the downloaded wheel
     const files = fs.readdirSync(ROOT_DIR);
-    const wheel = files.find(f => f.startsWith('rlm_claude_code') && f.endsWith('.whl'));
+    const wheel = files.find(f => f.startsWith('rlm_core') && f.endsWith('.whl'));
 
     if (wheel) {
       log(`Installing wheel: ${wheel}`, 'yellow');
-      runCommand(`uv pip install ${wheel}`, { silent: false });
+      runCommand(`uv pip install --force-reinstall ${wheel}`, { silent: false });
       // Clean up wheel file
       fs.unlinkSync(path.join(ROOT_DIR, wheel));
     }
@@ -290,7 +289,8 @@ function createStatus(
   binaries: Status,
   rlmCore: Status
 ): SetupStatus {
-  const needsAttention = venv !== 'ok' || rlmCore !== 'ok';
+  // Binaries are needed for hooks to work!
+  const needsAttention = venv !== 'ok' || rlmCore !== 'ok' || binaries === 'missing';
   const instructions: string[] = [];
 
   if (uv === 'missing') {
@@ -303,14 +303,14 @@ function createStatus(
     if (mode === 'marketplace') {
       instructions.push('Download binaries: npm run download:binaries');
     } else {
-      instructions.push('Build binaries: npm run build -- --binaries-only');
+      instructions.push('Build everything: npm run build:all');
     }
   }
   if (rlmCore === 'missing' || rlmCore === 'no-venv') {
     if (mode === 'marketplace') {
       instructions.push('Download and install wheel: npm run download:wheel && uv pip install *.whl');
     } else {
-      instructions.push('Build wheel: npm run build -- --wheel-only');
+      instructions.push('Build wheel: npm run build:wheel');
     }
   }
 
@@ -318,20 +318,28 @@ function createStatus(
 }
 
 function outputJson(status: SetupStatus): void {
-  // Build AI-friendly context
+  // Build AI-friendly context with clear instructions
   let additionalContext = 'RLM plugin setup status: ';
   if (status.needsAttention) {
     additionalContext += 'NEEDS ATTENTION. ';
+    const issues: string[] = [];
+
     if (status.uv === 'missing') {
-      additionalContext += 'uv package manager is not installed. ';
+      issues.push('uv package manager is not installed');
     }
     if (status.venv === 'missing') {
-      additionalContext += 'Python virtual environment is not set up. ';
+      issues.push('Python virtual environment (.venv) is missing');
+    }
+    if (status.binaries === 'missing' || status.binaries === 'partial') {
+      issues.push('Hook binaries are missing (bin/ directory)');
     }
     if (status.rlmCore === 'missing' || status.rlmCore === 'no-venv') {
-      additionalContext += 'rlm_core Python package is not installed. ';
+      issues.push('rlm_core Python package is not installed');
     }
-    additionalContext += 'Please help the user by running the suggested commands in the instructions array.';
+
+    additionalContext += issues.join('. ') + '. ';
+    additionalContext += `Quick fix: Run 'npm run build:all' from the plugin directory (${ROOT_DIR}) to build everything. `;
+    additionalContext += 'Or follow the specific instructions in rlmSetupStatus.instructions.';
   } else {
     additionalContext += 'All checks passed. Plugin is ready to use.';
   }

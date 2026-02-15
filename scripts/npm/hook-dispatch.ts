@@ -204,13 +204,16 @@ async function dispatch(hookName: string): Promise<number> {
     }
   }
 
-  // Nothing found
-  console.error(`Hook not found: ${hookName}`);
+  // Nothing found - output error to stderr for hooks to display
+  // Exit 2 = blocking error, stderr is shown as feedback
+  console.error(`Hook '${hookName}' not found.`);
   console.error(`Searched:`);
   console.error(`  - ${binaryPath}`);
   console.error(`  - ${pythonPath}`);
   console.error(`  - ${legacyPath}`);
-  return 1;
+  console.error('');
+  console.error(`Fix: cd ${ROOT_DIR} && npm run build:all`);
+  return 2;
 }
 
 // ============================================================================

@@ -73,6 +73,18 @@ function main(): void {
 
   log('\n=== Removing Build Artifacts ===', 'cyan');
 
+  // Remove Go binaries
+  if (fileExists('bin')) {
+    removeDir(path.join(ROOT_DIR, 'bin'));
+    log('Removed bin/', 'green');
+  }
+
+  // Remove rlm-core target directory (Rust build artifacts)
+  if (fileExists('vendor/loop/rlm-core/target')) {
+    removeDir(path.join(ROOT_DIR, 'vendor/loop/rlm-core/target'));
+    log('Removed vendor/loop/rlm-core/target/', 'green');
+  }
+
   // Remove wheel files
   const wheelsRemoved = removeFiles('*.whl');
   if (wheelsRemoved > 0) {

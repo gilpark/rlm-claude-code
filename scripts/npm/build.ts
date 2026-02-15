@@ -18,6 +18,7 @@ import { ROOT_DIR, log, runCommand, fileExists, getPlatform } from './common';
 
 interface BuildOptions {
   all: boolean;
+  develop: boolean;
   binariesOnly: boolean;
   wheelOnly: boolean;
 }
@@ -25,13 +26,14 @@ interface BuildOptions {
 function parseArgs(): BuildOptions {
   return {
     all: process.argv.includes('--all'),
+    develop: process.argv.includes('--develop'),
     binariesOnly: process.argv.includes('--binaries-only'),
     wheelOnly: process.argv.includes('--wheel-only'),
   };
 }
 
 function buildWheelFromSource(): boolean {
-  log('\n=== Building rlm-core Wheel from Source ===', 'cyan');
+  log('\n=== Building rlm_core Wheel from Source ===', 'cyan');
 
   if (!fileExists('vendor/loop/rlm-core/Cargo.toml')) {
     log('rlm-core submodule not found. Run: git submodule update --init --recursive', 'red');
@@ -39,19 +41,22 @@ function buildWheelFromSource(): boolean {
   }
 
   try {
-    log('Building rlm-core with maturin...');
-    runCommand('uv run maturin develop --release -v', { cwd: path.join(ROOT_DIR, 'vendor/loop/rlm-core') });
-    log('rlm-core wheel built successfully.', 'green');
+    // Build rlm_core wheel from submodule (creates rlm_core-0.1.0-...whl)
+    log('Building rlm_core wheel with maturin build...');
+    runCommand('uv run maturin build --release', { cwd: path.join(ROOT_DIR, 'vendor/loop/rlm-core') });
 
-    // Copy wheel to root for marketplace distribution
+    // Find and install the wheel directly from build location
     const wheelDir = path.join(ROOT_DIR, 'vendor/loop/rlm-core/target/wheels');
     if (fs.existsSync(wheelDir)) {
-      const wheels = fs.readdirSync(wheelDir).filter(f => f.endsWith('.whl'));
+      const wheels = fs.readdirSync(wheelDir).filter(f => f.startsWith('rlm_core') && f.endsWith('.whl'));
       if (wheels.length > 0) {
-        const srcWheel = path.join(wheelDir, wheels[0]);
-        const destWheel = path.join(ROOT_DIR, wheels[0]);
-        fs.copyFileSync(srcWheel, destWheel);
-        log(`Copied wheel to root: ${wheels[0]}`, 'dim');
+        const wheelPath = path.join(wheelDir, wheels[0]);
+        log(`Wheel built: ${wheels[0]}`, 'green');
+
+        // Install the wheel directly
+        log('Installing rlm_core wheel...');
+        runCommand(`uv run pip install --force-reinstall ${wheelPath}`);
+        log('rlm_core wheel installed.', 'green');
       }
     }
 
@@ -63,10 +68,31 @@ function buildWheelFromSource(): boolean {
   }
 }
 
+function developWheel(): boolean {
+  log('\n=== Developing rlm_core (maturin develop) ===', 'cyan');
+
+  if (!fileExists('vendor/loop/rlm-core/Cargo.toml')) {
+    log('rlm-core submodule not found. Run: git submodule update --init --recursive', 'red');
+    return false;
+  }
+
+  try {
+    // maturin develop builds and installs directly - no wheel file created
+    // Fast iteration for development
+    log('Building and installing rlm_core with maturin develop...');
+    runCommand('uv run maturin develop --release', { cwd: path.join(ROOT_DIR, 'vendor/loop/rlm-core') });
+    log('rlm_core installed in development mode.', 'green');
+    log('You can now: import rlm_core', 'dim');
+    return true;
+  } catch (error) {
+    const err = error as Error;
+    log(`Error developing wheel: ${err.message}`, 'red');
+    return false;
+  }
+}
+
 function buildGoBinaries(): boolean {
   log('\n=== Building Go Hook Binaries ===', 'cyan');
-
-  const { platform } = getPlatform();
 
   if (!fileExists('Makefile')) {
     log('Makefile not found.', 'red');
@@ -74,8 +100,8 @@ function buildGoBinaries(): boolean {
   }
 
   try {
-    log('Building Go binaries with Make...');
-    runCommand(`make PLATFORM=${platform}`);
+    log('Building Go binaries for all platforms with Make...');
+    runCommand(`make all`);
     log('Go binaries built successfully.', 'green');
     return true;
   } catch (error) {
@@ -141,6 +167,20 @@ async function main(): Promise<void> {
     log('Building everything from source...', 'cyan');
 
     if (!buildWheelFromSource()) {
+      process.exit(1);
+    }
+
+    if (!buildGoBinaries()) {
+      process.exit(1);
+    }
+
+    if (!installDeps()) {
+      process.exit(1);
+    }
+  } else if (options.develop) {
+    log('Development mode: fast iteration with maturin develop...', 'cyan');
+
+    if (!developWheel()) {
       process.exit(1);
     }
 

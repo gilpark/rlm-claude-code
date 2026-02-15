@@ -3,6 +3,7 @@
  * download-wheel.ts
  *
  * Download pre-built Python wheel from GitHub releases.
+ * Only downloads if the release version matches package.json version.
  */
 
 import fs from 'fs';
@@ -17,6 +18,12 @@ interface GitHubRelease {
     name: string;
     browser_download_url: string;
   }>;
+}
+
+function getPackageVersion(): string {
+  const packageJsonPath = path.join(ROOT_DIR, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  return packageJson.version;
 }
 
 function downloadFile(url: string, destPath: string): Promise<void> {
@@ -91,25 +98,32 @@ function getWheelPlatform(os: string, cpu: string): string {
 }
 
 async function main(): Promise<void> {
-  log('\n=========================================', 'cyan');
-  log('  Download Python Wheel', 'cyan');
-  log('=========================================', 'cyan');
+  log('\n=== Downloading Python Wheel ===', 'cyan');
 
   const { os, cpu } = getPlatform();
   const wheelPlatform = getWheelPlatform(os, cpu);
+  const packageVersion = getPackageVersion();
 
-  log(`\nPlatform: ${wheelPlatform}`, 'dim');
+  log(`Platform: ${wheelPlatform}`, 'dim');
+  log(`Package version: ${packageVersion}`, 'dim');
 
   try {
-    log('Fetching latest release information...', 'yellow');
+    log('Fetching latest release information...');
     const release = await getLatestRelease();
-    const version = release.tag_name;
-    log(`Latest version: ${version}`, 'green');
+    const releaseVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix
 
-    // Find matching wheel
+    // Check version compatibility
+    if (releaseVersion !== packageVersion) {
+      log(`\nVersion mismatch: package=${packageVersion}, release=${releaseVersion}`, 'yellow');
+      log('Cannot download wheel - versions must match for compatibility.', 'yellow');
+      log('Falling back to building from source...', 'yellow');
+      process.exit(1);
+    }
+
+    // Find matching wheel (rlm_core, not rlm_claude_code)
     const wheelAsset = release.assets.find((a) => {
       return (
-        a.name.includes('rlm_claude_code') &&
+        a.name.includes('rlm_core') &&
         a.name.endsWith('.whl') &&
         (a.name.includes(wheelPlatform) || a.name.includes('py3-none-any'))
       );
@@ -122,19 +136,16 @@ async function main(): Promise<void> {
     }
 
     const wheelPath = path.join(ROOT_DIR, wheelAsset.name);
-    log(`\nDownloading ${wheelAsset.name}...`, 'yellow');
+    log(`Downloading ${wheelAsset.name}...`);
 
     await downloadFile(wheelAsset.browser_download_url, wheelPath);
 
-    log(`\n[OK] Downloaded: ${wheelAsset.name}`, 'green');
+    log(`Wheel downloaded: ${wheelAsset.name}`, 'green');
     log('Install with: uv pip install ' + wheelAsset.name, 'dim');
 
-    log('\n=========================================', 'green');
-    log('  Download Complete!', 'green');
-    log('=========================================', 'green');
   } catch (error) {
     const err = error as Error;
-    log(`\nDownload failed: ${err.message}`, 'red');
+    log(`Download failed: ${err.message}`, 'red');
     process.exit(1);
   }
 }

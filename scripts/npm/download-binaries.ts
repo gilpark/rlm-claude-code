@@ -103,6 +103,15 @@ async function getLatestRelease(): Promise<GitHubRelease> {
 }
 
 /**
+ * Get package version from package.json
+ */
+function getPackageVersion(): string {
+  const packageJsonPath = path.join(ROOT_DIR, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  return packageJson.version;
+}
+
+/**
  * Remove Apple quarantine attributes on macOS
  * This is needed for binaries downloaded from the internet
  */
@@ -194,14 +203,14 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const force = args.includes('--force');
 
-  log('\n=========================================', 'cyan');
-  log('  Download Pre-built Binaries', 'cyan');
-  log('=========================================', 'cyan');
+  log('\n=== Downloading Hook Binaries ===', 'cyan');
 
   const { os, cpu, platform } = getPlatform();
   const binDir = path.join(ROOT_DIR, 'bin');
+  const packageVersion = getPackageVersion();
 
-  log(`\nPlatform: ${platform}`, 'dim');
+  log(`Platform: ${platform}`, 'dim');
+  log(`Package version: ${packageVersion}`, 'dim');
 
   // Create bin directory if needed
   if (!fs.existsSync(binDir)) {
@@ -210,23 +219,32 @@ async function main(): Promise<void> {
 
   // Check if already downloaded
   if (!force && binariesExist(binDir, os, cpu)) {
-    log(`\nBinaries already exist for ${platform}.`, 'green');
+    log(`Binaries already exist for ${platform}.`, 'green');
     log('Use --force to re-download.', 'dim');
     return;
   }
 
   try {
-    log('\nFetching latest release information...', 'yellow');
+    log('Fetching latest release information...');
     const release = await getLatestRelease();
-    const version = release.tag_name;
-    log(`Latest version: ${version}`, 'green');
+    const releaseVersion = release.tag_name.replace(/^v/, ''); // Remove 'v' prefix
+
+    // Check version compatibility
+    if (releaseVersion !== packageVersion) {
+      log(`\nVersion mismatch: package=${packageVersion}, release=${releaseVersion}`, 'yellow');
+      log('Cannot download binaries - versions must match for compatibility.', 'yellow');
+      log('Falling back to building from source...', 'yellow');
+      process.exit(1);
+    }
+
+    log(`Release version: ${releaseVersion}`, 'green');
 
     // Find the archive for this platform
-    const archiveName = getArchiveName(version, os, cpu);
+    const archiveName = getArchiveName(release.tag_name, os, cpu);
     const asset = release.assets.find((a) => a.name === archiveName);
 
     if (!asset) {
-      log(`\n[ERROR] Archive not found: ${archiveName}`, 'red');
+      log(`\nArchive not found: ${archiveName}`, 'red');
       log(`Available platforms in release:`, 'yellow');
       release.assets
         .filter(a => a.name.endsWith('.tar.gz'))
@@ -238,22 +256,22 @@ async function main(): Promise<void> {
 
     // Download the archive
     const archivePath = path.join(binDir, archiveName);
-    log(`\nDownloading ${archiveName}...`, 'yellow');
+    log(`Downloading ${archiveName}...`);
     await downloadFile(asset.browser_download_url, archivePath);
-    log(`  [OK] Downloaded`, 'green');
+    log(`  Downloaded`, 'green');
 
     // Extract
-    log('\nExtracting binaries...', 'yellow');
+    log('Extracting binaries...');
     await extractArchive(archivePath, binDir);
-    log('  [OK] Extracted', 'green');
+    log('  Extracted', 'green');
 
     // Clean up archive
     fs.unlinkSync(archivePath);
-    log('  [OK] Cleaned up archive', 'dim');
+    log('  Cleaned up archive', 'dim');
 
     // Set permissions
     setExecutablePermissions(binDir);
-    log('  [OK] Set executable permissions', 'dim');
+    log('  Set executable permissions', 'dim');
 
     // Remove Apple quarantine on macOS
     removeAppleQuarantine(binDir);
@@ -269,12 +287,9 @@ async function main(): Promise<void> {
       log(`  - ${binary}`, 'dim');
     }
 
-    log('\n=========================================', 'green');
-    log('  Download Complete!', 'green');
-    log('=========================================', 'green');
   } catch (error) {
     const err = error as Error;
-    log(`\nDownload failed: ${err.message}`, 'red');
+    log(`Download failed: ${err.message}`, 'red');
     log('\nYou may need to build from source:', 'yellow');
     log('  npm run build -- --binaries-only', 'cyan');
     process.exit(1);
