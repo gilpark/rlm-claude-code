@@ -1,64 +1,51 @@
-Toggle or configure RLM (Recursive Language Model) mode.
+---
+name: rlm
+description: Toggle or configure RLM mode settings. Use /rlm status to check configuration, /rlm on|off|auto to change activation mode, /rlm activate to launch the orchestrator.
+argument-hint: [status|on|off|auto|activate|verbose|debug]
+---
 
-## Usage
+# RLM Mode Configuration
 
-- `/rlm-claude-code:rlm` — Show current RLM status and configuration
-- `/rlm-claude-code:rlm activate` — Launch RLM orchestrator immediately
-- `/rlm-claude-code:rlm now` — Alias for activate (launch orchestrator now)
-- `/rlm-claude-code:rlm on` — Enable auto-activation for this session (mode: always)
-- `/rlm-claude-code:rlm off` — Disable RLM mode (use standard Claude Code)
-- `/rlm-claude-code:rlm auto` — Use complexity-based activation (default)
-- `/rlm-claude-code:rlm verbose` — Enable verbose trajectory output
-- `/rlm-claude-code:rlm debug` — Enable debug trajectory output with full content
+Manage RLM (Recursive Language Model) mode settings.
 
-> **Tip**: You can create a shell alias: `alias rlm='claude skill rlm-claude-code:rlm'`
+## Arguments: $ARGUMENTS
 
-## Activation Commands
+### If argument is empty or "status":
+Show current RLM status and configuration.
 
-| Command | Action |
-|---------|--------|
-| `activate` or `now` | Immediately launch the RLM orchestrator agent |
-| `on` | Enable auto-activation (RLM activates on complex prompts) |
-| `off` | Disable auto-activation (manual mode) |
-| `auto` | Use complexity-based activation (default) |
+### If argument is "activate" or "now":
+**MUST immediately invoke the orchestrator:**
+```
+Task(
+  subagent_type="rlm-claude-code:rlm-orchestrator",
+  prompt="[current conversation context]",
+  description="RLM orchestration"
+)
+```
 
-When you run `/rlm-claude-code:rlm activate`, the orchestrator agent will be invoked to handle your task with:
-- Context decomposition for large inputs
-- Recursive sub-queries for complex reasoning
-- Memory persistence across sessions
-- Intelligent model and depth selection
+### If argument is "on":
+Update `~/.claude/rlm-config.json` to set `activation.mode` to `"always"`.
 
-## Current Configuration
+### If argument is "off":
+Update `~/.claude/rlm-config.json` to set `activation.mode` to `"manual"`.
 
-Check `~/.claude/rlm-config.json` for:
+### If argument is "auto":
+Update `~/.claude/rlm-config.json` to set `activation.mode` to `"complexity"`.
+
+### If argument is "verbose":
+Update `~/.claude/rlm-config.json` to set `trajectory.verbosity` to `"verbose"`.
+
+### If argument is "debug":
+Update `~/.claude/rlm-config.json` to set `trajectory.verbosity` to `"debug"`.
+
+## Configuration File
+
+Settings are stored in `~/.claude/rlm-config.json`:
 - `activation.mode`: "complexity" | "always" | "manual"
 - `depth.default`: 2
 - `trajectory.verbosity`: "minimal" | "normal" | "verbose" | "debug"
 
-## When to Use
+## Related
 
-Force RLM on when:
-- Working with large codebases (>50 files in context)
-- Debugging complex multi-file issues
-- Refactoring across module boundaries
-- You want to see the reasoning trajectory
-
-Force RLM off when:
-- Simple file operations
-- Quick questions about single files
-- You want faster responses for simple tasks
-
-## Trajectory Verbosity
-
-| Level | Shows |
-|-------|-------|
-| minimal | RECURSE, FINAL, ERROR only |
-| normal | All events, truncated content |
-| verbose | All events, full content |
-| debug | Everything + internal state |
-
-## Related Commands
-
-- `/rlm-claude-code:rlm-orchestrator` — Launch RLM orchestrator agent for complex context tasks
-- `/rlm-claude-code:simple` — Bypass RLM for a single operation
-- `/rlm-claude-code:trajectory <file>` — Analyze a saved trajectory
+- `/rlm-claude-code:rlm-orchestrator` — Launch RLM orchestrator agent
+- `/rlm-claude-code:simple` — Bypass RLM for simple operations

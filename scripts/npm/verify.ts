@@ -48,20 +48,30 @@ function verifyBinaries(): { passed: number; failed: number } {
   return { passed, failed };
 }
 
+function getVenvPython(): string {
+  return process.platform === 'win32'
+    ? path.join(ROOT_DIR, '.venv', 'Scripts', 'python.exe')
+    : path.join(ROOT_DIR, '.venv', 'bin', 'python');
+}
+
 function verifyRlmCore(): boolean {
   log('\n=== Verifying rlm-core ===', 'cyan');
 
+  // Use venv python directly (uv run creates isolated env without rlm_core)
+  const venvPython = getVenvPython();
+  const python = fs.existsSync(venvPython) ? venvPython : 'python';
+
   try {
-    const result = execSync('uv run python -c "import rlm_core; print(rlm_core.version())"', {
+    const result = execSync(`"${python}" -c "import rlm_core; print(rlm_core.version())"`, {
       cwd: ROOT_DIR,
       encoding: 'utf8',
-      timeout: 30000,
+      timeout: 10000,
     });
     log(`  [OK] rlm-core version: ${result.trim()}`, 'green');
     return true;
   } catch (error) {
     log('  [ERROR] rlm-core not available', 'red');
-    log('  Run: npm run build or npm run download:wheel', 'yellow');
+    log('  Run: npm run ensure-setup', 'yellow');
     return false;
   }
 }
@@ -99,11 +109,15 @@ function verifyHooks(): boolean {
 function verifyPythonDeps(): boolean {
   log('\n=== Verifying Python Dependencies ===', 'cyan');
 
+  // Use venv python directly for faster verification
+  const venvPython = getVenvPython();
+  const python = fs.existsSync(venvPython) ? venvPython : 'python';
+
   try {
-    execSync('uv run python -c "import pydantic; import httpx; import anthropic"', {
+    execSync(`"${python}" -c "import pydantic; import httpx; import anthropic"`, {
       cwd: ROOT_DIR,
       encoding: 'utf8',
-      timeout: 30000,
+      timeout: 10000,
     });
     log('  [OK] Core Python dependencies available', 'green');
     return true;

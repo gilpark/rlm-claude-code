@@ -72,7 +72,7 @@ git clone --recurse-submodules https://github.com/your-fork/rlm-claude-code.git
 cd rlm-claude-code
 
 # Build from source (requires Rust + Go)
-npm run build -- --all
+npm run build
 
 # Create symlink for development
 claude plugin install . --scope user
@@ -121,8 +121,8 @@ The plugin includes automatic dependency checking:
 
 **Manual commands:**
 ```bash
-npm run ensure-setup           # Check status
-npm run ensure-setup -- --fix  # Auto-fix (downloads from GitHub)
+npm run ensure-setup           # Check and auto-fix (downloads from GitHub)
+npm run ensure-setup -- --check # Check only, don't fix
 ```
 
 ---
@@ -182,11 +182,11 @@ Settings at `~/.claude/rlm-config.json`:
 ### Setup Issues
 
 ```bash
-# Check what's missing
-npm run ensure-setup
+# Check status without fixing
+npm run ensure-setup -- --check
 
-# Auto-fix (downloads from GitHub)
-npm run ensure-setup -- --fix
+# Check and auto-fix (downloads or builds as needed)
+npm run ensure-setup
 ```
 
 ### Tests Failing

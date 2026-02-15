@@ -26,38 +26,31 @@ This results in better accuracy on complex tasks while optimizing cost through i
 - **uv** package manager — `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **Node.js 20+** — `brew install node` or [nodejs.org](https://nodejs.org)
 
-### Clone & Setup (Pre-built Binaries)
+### Clone & Setup
 
 ```bash
 git clone --recurse-submodules https://github.com/rand/rlm-claude-code.git
 cd rlm-claude-code
 npm install
-
-# Verify
-npm run verify
 ```
 
-### Build from Source (Requires Rust)
+The `npm install` automatically:
+1. Checks version from `marketplace.json`
+2. If matching GitHub release exists: downloads pre-built binaries + wheel
+3. If no release: builds from source
+4. Sets up Python venv and dependencies
 
-If you want to build rlm-core from source instead of using pre-built wheels:
+### Build from Source (Requires Rust + Go)
+
+If you want to build everything from source:
 
 ```bash
 # Prerequisites
 # - Rust 1.75+: rustup update stable
-# - maturin: pip install maturin
+# - Go 1.21+: brew install go
 
-git clone --recurse-submodules https://github.com/rand/rlm-claude-code.git
-cd rlm-claude-code
-
-# Build rlm-core Rust library
-maturin develop --release
-
-# Install Python dependencies
-uv sync --all-extras
-
-# Verify
-python -c "import rlm_core; print(rlm_core.version())"
-uv run pytest tests/ -v
+npm run build  # Build binaries + wheel from source
+npm run verify # Verify installation
 ```
 
 **Note**: The `python-source` in `pyproject.toml` should point to `"vendor/loop/rlm-core/python"` for maturin to find the Python module correctly.
@@ -80,16 +73,17 @@ claude plugin install rlm-claude-code@rlm-claude-code
 
 The plugin automatically checks and fixes dependencies on first use:
 
-- Checks: `uv`, Python venv, Go binaries, `rlm_core` wheel
-- Downloads missing components from GitHub releases
-- AI assistant sees status and can help if issues found
+1. Reads version from `marketplace.json`
+2. Checks GitHub for matching release
+3. Downloads binaries + wheel (if release exists) OR builds from source
+4. Sets up Python venv and dependencies
 
 ```bash
-# Manual check
+# Check and auto-fix (download or build as needed)
 npm run ensure-setup
 
-# Auto-fix
-npm run ensure-setup -- --fix
+# Check only, don't fix
+npm run ensure-setup -- --check
 ```
 
 ---
@@ -334,12 +328,13 @@ Hooks emit and consume events via `~/.claude/events/`, enabling coordination bet
 
 | Command | Description |
 |---------|-------------|
-| `npm install` | Full setup (downloads pre-built binaries) |
-| `npm run ensure-setup` | Check/fix missing dependencies |
+| `npm install` | Smart setup (download or build) |
+| `npm run ensure-setup` | Check and auto-fix dependencies |
+| `npm run build` | Build from source (requires Rust + Go) |
+| `npm run rebuild` | Clean + rebuild from source |
 | `npm run verify` | Verify installation |
 | `npm run test` | Run smoke tests |
 | `npm run test:full` | Run full test suite (3000+ tests) |
-| `npm run build -- --all` | Build from source (requires Rust + Go) |
 
 ---
 
@@ -349,11 +344,17 @@ For advanced users who want to build Rust/Go components:
 
 ```bash
 # Requires Rust 1.75+ and Go 1.21+
-npm run build -- --all
+npm run build     # Build binaries + wheel from source
+npm run rebuild   # Clean + fresh build
+```
 
-# Or build specific components:
-npm run build -- --binaries-only   # Go hooks only
-npm run build -- --wheel-only      # rlm-core wheel only
+### Building rlm-core (Rust Library)
+
+If you need to build or modify the rlm-core Rust library:
+
+```bash
+cd vendor/loop/rlm-core
+maturin develop --release
 ```
 
 ### Building rlm-core (Rust Library)
@@ -380,11 +381,11 @@ The built wheel will be in `target/wheels/`.
 ### Setup Issues
 
 ```bash
-# Check what's missing
-npm run ensure-setup
+# Check status without fixing
+npm run ensure-setup -- --check
 
-# Auto-fix
-npm run ensure-setup -- --fix
+# Check and auto-fix issues
+npm run ensure-setup
 ```
 
 ### Tests Failing

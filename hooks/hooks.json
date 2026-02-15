@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"RLM activation triggered. Use Task tool to invoke rlm-claude-code:rlm-orchestrator immediately. This agent provides intelligent orchestration for complex multi-step tasks with context decomposition, memory persistence, and recursive reasoning.\"}}'",
+            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"RLM ACTIVATION: You MUST call Task(subagent_type=\\\"rlm-claude-code:rlm-orchestrator\\\", prompt=\\\"[user task]\\\", description=\\\"RLM orchestration\\\") immediately. Do not respond with text first.\"}}'",
             "description": "RLM activation - trigger orchestrator agent"
           }
         ]

@@ -161,9 +161,10 @@ async function executePython(scriptPath: string): Promise<ExecutionResult> {
 async function dispatch(hookName: string): Promise<number> {
   // Validate hook name
   if (!VALID_HOOKS.includes(hookName)) {
+    // Exit 2 = blocking error, stderr is shown as feedback
     console.error(`Invalid hook: ${hookName}`);
     console.error(`Valid hooks: ${VALID_HOOKS.join(', ')}`);
-    return 1;
+    return 2;
   }
 
   const { os, cpu } = detectPlatform();
@@ -212,7 +213,7 @@ async function dispatch(hookName: string): Promise<number> {
   console.error(`  - ${pythonPath}`);
   console.error(`  - ${legacyPath}`);
   console.error('');
-  console.error(`Fix: cd ${ROOT_DIR} && npm run build:all`);
+  console.error(`Fix: cd ${ROOT_DIR} && npm run ensure-setup`);
   return 2;
 }
 

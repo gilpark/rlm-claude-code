@@ -5,7 +5,7 @@ Context for developers working on the RLM-Claude-Code project.
 ## Quick Start
 
 ```bash
-# Setup (downloads pre-built binaries)
+# Setup (smart: downloads or builds based on release availability)
 npm install
 
 # Verify installation
@@ -64,21 +64,22 @@ rlm-claude-code/
 
 ```bash
 # Setup
-npm install           # Full setup with pre-built binaries
-npm run ensure-setup  # Check/fix missing dependencies
-npm run verify        # Verify installation
+npm install             # Smart setup (download or build)
+npm run ensure-setup    # Check and auto-fix dependencies
+npm run ensure-setup -- --check  # Check only, don't fix
+npm run verify          # Verify installation
 
 # Testing
-npm run test          # Run smoke tests
-npm run test:full     # Run full test suite (3000+ tests)
-npm run test:npm      # Run TypeScript tests for npm scripts
+npm run test            # Run smoke tests
+npm run test:full       # Run full test suite (3000+ tests)
+npm run test:npm        # Run TypeScript tests for npm scripts
 
 # Building
-npm run build         # Download binaries + install deps
-npm run build -- --all  # Build from source (needs Rust + Go)
+npm run build           # Build from source (needs Rust + Go)
+npm run rebuild         # Clean + build from source
 
 # Python tools
-uv run ty check src/  # Type check (must pass)
+uv run ty check src/    # Type check (must pass)
 uv run ruff check src/ --fix  # Lint (must pass)
 uv run ruff format src/       # Format
 
@@ -138,31 +139,40 @@ Use conventional commits:
 
 ## Self-Healing Setup System
 
-The plugin includes automatic dependency management:
+The plugin includes a single smart entry point for dependency management:
+
+### ensure-setup.ts
+
+**What it does:**
+1. Reads version from `marketplace.json`
+2. Checks GitHub for matching release
+3. If release exists: downloads binaries + wheel
+4. If no release: builds from source
+5. Sets up Python venv and dependencies
+
+**Usage:**
+```bash
+npm run ensure-setup            # Auto-fix (download or build)
+npm run ensure-setup -- --check # Check only, don't fix
+npm run ensure-setup -- --json  # JSON output (for hooks)
+```
 
 ### Components
 
 | File | Purpose |
 |------|---------|
-| `scripts/npm/ensure-setup.ts` | Checks and fixes dependencies |
+| `scripts/npm/ensure-setup.ts` | Smart setup (check, download, build) |
 | `scripts/npm/hook-dispatch.ts` | Cross-platform hook dispatcher |
-| `scripts/npm/download-binaries.ts` | Downloads Go binaries from GitHub |
-| `scripts/npm/download-wheel.ts` | Downloads Python wheel from GitHub |
-| `hooks/hooks.json` | Hook configuration (uses npx ts-node) |
-
-### How It Works
-
-1. On SessionStart, `ensure-setup.ts --json` runs
-2. Checks: `uv`, venv, binaries, `rlm_core`
-3. Outputs JSON status to AI via `hookSpecificOutput`
-4. AI can guide user to fix issues if `needsAttention: true`
+| `scripts/npm/build.ts` | Build from source |
+| `scripts/npm/verify.ts` | Verify installation |
+| `hooks/hooks.json` | Hook configuration |
 
 ### Installation Modes
 
 | Mode | Detection | Behavior |
 |------|-----------|----------|
 | marketplace | No `.git`, no `/dev/` in path | Download from GitHub releases |
-| dev | `.git` exists or `/dev/` in path | Prompt to build from source |
+| dev | `.git` exists or `/dev/` in path | Build from source |
 
 ## Implementation Status
 
