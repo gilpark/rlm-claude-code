@@ -5,11 +5,16 @@ Implements: Spec §8.2 Performance Targets validation
 
 Run with:
     pytest tests/benchmarks/ --benchmark-only --benchmark-json=results.json
+
+Note: Benchmarks are skipped by default in normal test runs.
+Use --benchmark-only to run them explicitly.
 """
 
 import asyncio
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from src.cache import (
     ContextCache,
@@ -19,6 +24,11 @@ from src.cache import (
 )
 from src.cost_tracker import CostComponent, CostTracker, estimate_tokens
 from src.prompt_optimizer import PromptLibrary, PromptResult, PromptType
+
+
+# Timeout for benchmark tests to prevent hanging
+# Issue: https://github.com/rand/rlm-claude-code/issues/1
+BENCHMARK_TIMEOUT = 60  # seconds
 
 
 class TestCacheBenchmarks:
@@ -105,8 +115,14 @@ class TestCacheBenchmarks:
 class TestCostTrackerBenchmarks:
     """Benchmark tests for cost tracking operations."""
 
+    @pytest.mark.timeout(BENCHMARK_TIMEOUT)
     def test_record_usage_performance(self, benchmark):
-        """Benchmark token usage recording."""
+        """Benchmark token usage recording.
+
+        Note: This test has a timeout to prevent hanging on slow systems
+        or when tiktoken encoding data needs to be downloaded.
+        Issue: https://github.com/rand/rlm-claude-code/issues/1
+        """
         tracker = CostTracker(budget_tokens=1_000_000)
 
         def do_records():

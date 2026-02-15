@@ -26,6 +26,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "pytest-benchmark>=4.0",
+    "pytest-timeout>=2.3",  # Timeout for benchmark tests (Issue #1)
     "pytest-watch>=4.2",
     "syrupy>=4.0",  # Snapshot testing
     "ruff>=0.8",
@@ -42,7 +43,7 @@ build-backend = "maturin"
 [tool.maturin]
 manifest-path = "vendor/loop/rlm-core/Cargo.toml"
 features = ["python"]
-python-source = "vendor/loop/rlm-core/python"
+# python-source = "vendor/loop/rlm-core/python"
 module-name = "rlm_core"
 
 [tool.ruff]
