@@ -133,6 +133,9 @@ def sync_context():
         context["rlm_active"] = persistence.current_state.rlm_active if persistence.current_state else False
         context["last_tool"] = {"name": tool_name, "input": tool_input} if tool_name else None
 
+        # Persist state to disk
+        persistence.save_state(session_id)
+
         save_context(context)
 
         # Output success

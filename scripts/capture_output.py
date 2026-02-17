@@ -144,6 +144,9 @@ def capture_output():
                 "content": tool_response[:1000],
             })
 
+        # Persist state to disk
+        persistence.save_state(session_id)
+
         save_context(context)
 
         # Output success
