@@ -43,6 +43,17 @@ def save_activation_state(should_activate: bool, reason: str) -> None:
         json.dump(state, f)
 
 
+def load_config() -> dict:
+    """Load RLM config from ~/.claude/rlm-config.json."""
+    config_file = Path.home() / ".claude" / "rlm-config.json"
+    if config_file.exists():
+        try:
+            return json.loads(config_file.read_text())
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
 def check_complexity(prompt: str) -> None:
     """
     Check complexity and output activation decision.
@@ -57,6 +68,15 @@ def check_complexity(prompt: str) -> None:
     should_activate = False
     reason = "unknown"
 
+    # Load config to check activation mode
+    config = load_config()
+    activation_config = config.get("activation", {})
+    mode = activation_config.get("mode", "complexity")
+
+    # Check for forced modes from config
+    rlm_mode_forced = mode == "always"
+    simple_mode_forced = mode == "never"
+
     try:
         from src.complexity_classifier import should_activate_rlm
         from src.types import SessionContext
@@ -64,12 +84,21 @@ def check_complexity(prompt: str) -> None:
         # Create minimal context (full context comes from Claude Code)
         context = SessionContext()
 
-        should_activate, reason = should_activate_rlm(prompt, context)
+        should_activate, reason = should_activate_rlm(
+            prompt,
+            context,
+            rlm_mode_forced=rlm_mode_forced,
+            simple_mode_forced=simple_mode_forced,
+        )
 
     except ImportError:
         # Fallback if modules not available
-        should_activate = False
-        reason = "modules_not_loaded"
+        if rlm_mode_forced:
+            should_activate = True
+            reason = "config_mode_always"
+        else:
+            should_activate = False
+            reason = "modules_not_loaded"
 
     # Always save state for other hooks to read
     save_activation_state(should_activate, reason)
