@@ -14,14 +14,31 @@ Use this when you need:
 - Complex reasoning with context externalization
 - REPL-based context decomposition
 
+**Note**: When you explicitly call this command, complexity checking is bypassed - RLM activates immediately.
+
 ## How It Works
 
 This command launches the RLM orchestrator as a Task agent with full tool access. The agent:
 
-1. Externalizes conversation context to Python variables
-2. Uses REPL operations (peek, search, summarize) for efficient context access
+1. Loads context from `~/.claude/rlm-state/context.json`
+2. Uses REPL bridge for context operations (peek, search, summarize, llm)
 3. Can spawn recursive sub-queries for deep analysis
 4. Manages depth budgets and model cascades (Opus → Sonnet → Haiku)
+
+## REPL Bridge
+
+The agent uses `scripts/repl_bridge.py` for real Python REPL operations:
+
+```bash
+# Peek at context
+uv run python scripts/repl_bridge.py --op peek --args '{"var": "conversation", "start": 0, "end": 5}'
+
+# Search files
+uv run python scripts/repl_bridge.py --op search --args '{"var": "files", "pattern": "def auth"}'
+
+# Get context keys
+uv run python scripts/repl_bridge.py --op context --args '{"action": "keys"}'
+```
 
 ## Instructions
 
