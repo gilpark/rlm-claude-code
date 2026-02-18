@@ -4,14 +4,12 @@ description: |
   Toggle or configure RLM (Recursive Language Model) mode.
   Controls activation mode, verbosity, and depth settings.
 hooks:
-  # Load current RLM status before displaying
   PreToolUse:
     - matcher: "*"
       hooks:
         - type: command
-          command: 'cd "${CLAUDE_PLUGIN_ROOT}" && .venv/bin/python scripts/run_orchestrator.py --status'
+          command: ${CLAUDE_PLUGIN_ROOT}/scripts/hooks/status_rlm.sh
           timeout: 1000
-          description: "Load current RLM status"
 ---
 
 Toggle or configure RLM (Recursive Language Model) mode.

@@ -3,21 +3,32 @@
 RLM Orchestrator Entry Point.
 
 This script runs the RLM orchestrator directly, using Claude CLI for LLM calls
-when no API keys are available. Context is loaded from the hook-generated JSON file.
+when no API keys are available. Context can be passed via files or loaded from disk.
 
 Usage:
-    uv run python scripts/run_orchestrator.py "analyze this code"
-    uv run python scripts/run_orchestrator.py --query "explain the architecture" --depth 2
-    uv run python scripts/run_orchestrator.py --init          # Initialize context (for SubagentStart hook)
-    uv run python scripts/run_orchestrator.py --validate      # Validate dependencies (for PreToolUse hook)
-    uv run python scripts/run_orchestrator.py --status        # Show RLM status (for /rlm command)
-    uv run python scripts/run_orchestrator.py --bypass        # Set bypass flag (for /simple command)
+    # Basic usage - pass files directly
+    uv run python scripts/run_orchestrator.py "analyze this code" --files src/auth.py src/api.py
+
+    # With directory (recursively finds .py files)
+    uv run python scripts/run_orchestrator.py "explain the architecture" --dir src/
+
+    # With custom depth
+    uv run python scripts/run_orchestrator.py --depth 3 --dir src/ "complex analysis task"
+
+    # Verbose output
+    uv run python scripts/run_orchestrator.py --verbose --files src/main.py "debug this code"
+
+    # Utility commands
+    uv run python scripts/run_orchestrator.py --validate  # Check dependencies
+    uv run python scripts/run_orchestrator.py --status    # Show RLM status
     uv run python scripts/run_orchestrator.py --help
 
-Environment:
-    Context is loaded from ~/.claude/rlm-state/context.json (written by sync_context hook)
+Context Sources (in order of priority):
+    1. --files: Explicit file paths passed as arguments
+    2. --dir: Directory to scan for files (respects --ext filter)
+    3. Disk: ~/.claude/rlm-state/context.json (fallback from hooks)
 
-    LLM Provider Selection (automatic):
+LLM Provider Selection (automatic):
     - If ANTHROPIC_API_KEY is set → Uses Anthropic API
     - If OPENAI_API_KEY is set → Uses OpenAI API
     - Otherwise → Uses Claude CLI (subscription auth, no API key needed)
@@ -38,8 +49,8 @@ def get_state_dir() -> Path:
     return Path.home() / ".claude" / "rlm-state"
 
 
-def load_context() -> dict[str, Any]:
-    """Load context from state file (written by hooks)."""
+def load_context_from_disk() -> dict[str, Any]:
+    """Load context from state file (written by hooks). Fallback only."""
     ctx_file = get_state_dir() / "context.json"
     if ctx_file.exists():
         try:
@@ -54,12 +65,78 @@ def load_context() -> dict[str, Any]:
     }
 
 
-def save_context(data: dict[str, Any]) -> None:
-    """Save context to state file."""
-    state_dir = get_state_dir()
-    state_dir.mkdir(parents=True, exist_ok=True)
-    ctx_file = state_dir / "context.json"
-    ctx_file.write_text(json.dumps(data, indent=2, default=str))
+def load_files_from_paths(file_paths: list[str]) -> dict[str, str]:
+    """Load file contents from explicit paths."""
+    files = {}
+    for path_str in file_paths:
+        path = Path(path_str)
+        if path.exists() and path.is_file():
+            try:
+                files[str(path)] = path.read_text()
+            except Exception as e:
+                print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+    return files
+
+
+def load_files_from_directory(
+    directory: str,
+    extensions: list[str] | None = None,
+    max_files: int = 50,
+    max_size_kb: int = 100,
+) -> dict[str, str]:
+    """Load files from a directory recursively."""
+    if extensions is None:
+        extensions = [".py", ".md", ".json", ".yaml", ".yml", ".toml"]
+
+    files = {}
+    dir_path = Path(directory)
+    if not dir_path.exists():
+        print(f"Warning: Directory not found: {directory}", file=sys.stderr)
+        return files
+
+    for ext in extensions:
+        for path in dir_path.rglob(f"*{ext}"):
+            if len(files) >= max_files:
+                print(f"Warning: Max files ({max_files}) reached", file=sys.stderr)
+                break
+
+            # Skip hidden dirs and common exclusions
+            if any(part.startswith(".") or part in {"node_modules", "__pycache__", ".venv", "venv"} for part in path.parts):
+                continue
+
+            # Skip large files
+            if path.stat().st_size > max_size_kb * 1024:
+                continue
+
+            try:
+                files[str(path)] = path.read_text()
+            except Exception:
+                pass
+
+    return files
+
+
+def build_context(
+    files: dict[str, str] | None = None,
+    working_memory: dict[str, Any] | None = None,
+    use_disk_fallback: bool = True,
+) -> dict[str, Any]:
+    """Build context from files or disk fallback."""
+    context = {
+        "conversation": [],
+        "files": files or {},
+        "tool_outputs": [],
+        "working_memory": working_memory or {},
+    }
+
+    # If no files provided and fallback enabled, try disk
+    if not context["files"] and use_disk_fallback:
+        disk_context = load_context_from_disk()
+        if disk_context.get("files"):
+            context["files"] = disk_context["files"]
+            context["working_memory"] = disk_context.get("working_memory", {})
+
+    return context
 
 
 def build_session_context(data: dict[str, Any]):
@@ -102,16 +179,11 @@ def build_session_context(data: dict[str, Any]):
 
 
 def do_init() -> dict[str, Any]:
-    """Initialize RLM context (for SubagentStart hook)."""
-    context = load_context()
-
-    # Return hook-compatible response
+    """Initialize RLM context - kept for backward compatibility."""
+    context = load_context_from_disk()
     result = {
         "status": "initialized",
-        "hookSpecificOutput": {
-            "hookEventName": "SubagentStart",
-            "additionalContext": f"[RLM context loaded: {len(context.get('files', {}))} files, {len(context.get('tool_outputs', []))} outputs]"
-        }
+        "files_loaded": len(context.get("files", {})),
     }
     return result
 
@@ -149,7 +221,7 @@ def do_status() -> dict[str, Any]:
     from src.config import RLMConfig
 
     config = RLMConfig.load()
-    context = load_context()
+    context = load_context_from_disk()
 
     result = {
         "status": "active",
@@ -163,10 +235,6 @@ def do_status() -> dict[str, Any]:
             "messages": len(context.get("conversation", [])),
             "tool_outputs": len(context.get("tool_outputs", [])),
         },
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": f"[RLM status: mode={config.activation.mode}, depth={config.depth.max}, files={len(context.get('files', {}))}]"
-        }
     }
     return result
 
@@ -180,17 +248,15 @@ def do_bypass() -> dict[str, Any]:
     bypass_file = state_dir / "bypass_rlm.json"
     bypass_file.write_text(json.dumps({"bypass": True, "reason": "simple_mode"}))
 
-    result = {
-        "status": "bypass_set",
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "additionalContext": "[RLM bypass enabled for this operation]"
-        }
-    }
-    return result
+    return {"status": "bypass_set"}
 
 
-async def run_orchestrator(query: str, depth: int = 2, verbose: bool = False) -> str:
+async def run_orchestrator(
+    query: str,
+    depth: int = 2,
+    verbose: bool = False,
+    files: dict[str, str] | None = None,
+) -> str:
     """
     Run the RLM orchestrator on a query.
 
@@ -198,6 +264,7 @@ async def run_orchestrator(query: str, depth: int = 2, verbose: bool = False) ->
         query: User query to process
         depth: Maximum recursion depth (default 2)
         verbose: Print trajectory events
+        files: Dict of filename -> content for context
 
     Returns:
         Final answer from orchestrator
@@ -206,13 +273,18 @@ async def run_orchestrator(query: str, depth: int = 2, verbose: bool = False) ->
     from src.config import DepthConfig, RLMConfig
     from src.trajectory import TrajectoryEventType
 
-    # Load context from hooks
-    context_data = load_context()
+    # Build context from files (with disk fallback)
+    context_data = build_context(files=files, use_disk_fallback=True)
     context = build_session_context(context_data)
 
-    # Configure depth
+    if verbose:
+        print(f"[RLM] Loaded {len(context.files)} files into context")
+
+    # Configure depth and force always mode
+    from src.config import ActivationConfig
     config = RLMConfig(
         depth=DepthConfig(max=depth),
+        activation=ActivationConfig(mode="always"),
     )
 
     # Create orchestrator (auto-uses CLI if no API keys)
@@ -245,42 +317,52 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Basic usage
-    uv run python scripts/run_orchestrator.py "analyze the auth module"
+    # Pass files directly
+    uv run python scripts/run_orchestrator.py "analyze auth" --files src/auth.py src/api.py
 
-    # With custom depth
-    uv run python scripts/run_orchestrator.py --depth 3 "complex analysis task"
+    # Scan a directory
+    uv run python scripts/run_orchestrator.py "explain architecture" --dir src/
 
-    # Verbose output
-    uv run python scripts/run_orchestrator.py --verbose "debug this code"
+    # With custom depth and verbose
+    uv run python scripts/run_orchestrator.py --depth 3 --verbose --dir src/ "complex analysis"
 
-    # Hook operations
-    uv run python scripts/run_orchestrator.py --init      # For SubagentStart hook
-    uv run python scripts/run_orchestrator.py --validate  # For PreToolUse hook
-    uv run python scripts/run_orchestrator.py --status    # For /rlm command
-    uv run python scripts/run_orchestrator.py --bypass    # For /simple command
+    # Utility commands
+    uv run python scripts/run_orchestrator.py --validate  # Check dependencies
+    uv run python scripts/run_orchestrator.py --status    # Show RLM status
         """,
     )
     parser.add_argument("query", nargs="?", help="Query to process")
     parser.add_argument("--query", "-q", dest="query_flag", help="Query to process (alternative)")
     parser.add_argument("--depth", "-d", type=int, default=2, help="Max recursion depth (default: 2)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print trajectory events")
-    parser.add_argument("--context", action="store_true", help="Print loaded context and exit")
 
-    # Hook flags
-    parser.add_argument("--init", action="store_true", help="Initialize context (for SubagentStart hook)")
-    parser.add_argument("--validate", action="store_true", help="Validate dependencies (for PreToolUse hook)")
-    parser.add_argument("--status", action="store_true", help="Show RLM status (for /rlm command)")
-    parser.add_argument("--bypass", action="store_true", help="Set bypass flag (for /simple command)")
+    # Context source arguments
+    parser.add_argument(
+        "--files", "-f", nargs="+", metavar="FILE",
+        help="Files to include in context (space-separated)"
+    )
+    parser.add_argument(
+        "--dir", "-D", metavar="DIR",
+        help="Directory to scan for files"
+    )
+    parser.add_argument(
+        "--ext", "-e", nargs="+", default=[".py", ".md"],
+        help="File extensions to include when scanning directory (default: .py .md)"
+    )
+    parser.add_argument(
+        "--max-files", type=int, default=50,
+        help="Max files to load from directory (default: 50)"
+    )
+
+    # Utility commands
+    parser.add_argument("--validate", action="store_true", help="Validate dependencies")
+    parser.add_argument("--status", action="store_true", help="Show RLM status")
+    parser.add_argument("--bypass", action="store_true", help="Set bypass flag")
+    parser.add_argument("--init", action="store_true", help="Initialize (backward compat)")
 
     args = parser.parse_args()
 
-    # Handle hook flags
-    if args.init:
-        result = do_init()
-        print(json.dumps(result))
-        return
-
+    # Handle utility commands
     if args.validate:
         result = do_validate()
         print(json.dumps(result))
@@ -298,10 +380,9 @@ Examples:
         print(json.dumps(result))
         return
 
-    # Handle --context flag
-    if args.context:
-        context = load_context()
-        print(json.dumps(context, indent=2, default=str))
+    if args.init:
+        result = do_init()
+        print(json.dumps(result))
         return
 
     # Get query
@@ -309,9 +390,26 @@ Examples:
     if not query:
         parser.error("Query required. Provide as argument or use --query")
 
+    # Load files from specified sources
+    files = {}
+
+    # 1. Load from explicit --files
+    if args.files:
+        files.update(load_files_from_paths(args.files))
+
+    # 2. Load from --dir
+    if args.dir:
+        files.update(load_files_from_directory(
+            args.dir,
+            extensions=args.ext,
+            max_files=args.max_files,
+        ))
+
     # Run orchestrator
     try:
-        result = asyncio.run(run_orchestrator(query, depth=args.depth, verbose=args.verbose))
+        result = asyncio.run(
+            run_orchestrator(query, depth=args.depth, verbose=args.verbose, files=files)
+        )
         print(result)
     except KeyboardInterrupt:
         print("\n[interrupted]")

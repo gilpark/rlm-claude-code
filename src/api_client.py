@@ -10,9 +10,11 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -60,6 +62,10 @@ class StreamChunk:
     is_final: bool = False
     input_tokens: int = 0
     output_tokens: int = 0
+
+
+# Progress callback type for long-running LLM calls
+ProgressCallback = Callable[[int, float], None]  # (elapsed_seconds, timeout_seconds)
 
 
 # Model registry with provider info
@@ -118,6 +124,7 @@ class BaseLLMClient(ABC):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         component: CostComponent = CostComponent.ROOT_PROMPT,
+        progress_callback: ProgressCallback | None = None,
     ) -> APIResponse:
         """Get completion from LLM."""
         pass
@@ -160,6 +167,7 @@ class AnthropicClient(BaseLLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         component: CostComponent = CostComponent.ROOT_PROMPT,
+        progress_callback: ProgressCallback | None = None,
     ) -> APIResponse:
         model = model or "claude-opus-4-5-20251101"
 
@@ -265,6 +273,7 @@ class OpenAIClient(BaseLLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         component: CostComponent = CostComponent.ROOT_PROMPT,
+        progress_callback: ProgressCallback | None = None,
     ) -> APIResponse:
         model = model or "gpt-5.2-codex"
 
@@ -467,9 +476,9 @@ class ClaudeHeadlessClient(BaseLLMClient):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         component: CostComponent = CostComponent.ROOT_PROMPT,
+        progress_callback: ProgressCallback | None = None,
     ) -> APIResponse:
-        """Get completion via Claude CLI subprocess."""
-        import asyncio
+        """Get completion via Claude CLI subprocess with optional progress tracking."""
         import json
 
         model = self._resolve_model(model)
@@ -497,10 +506,35 @@ class ClaudeHeadlessClient(BaseLLMClient):
                 env=env,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout,
-            )
+            # Track elapsed time and emit progress
+            start_time = time.monotonic()
+            heartbeat_interval = 10.0  # seconds between progress callbacks
+
+            async def run_with_progress():
+                """Run subprocess with periodic progress callbacks."""
+                if progress_callback is None:
+                    # No callback, just wait
+                    return await asyncio.wait_for(
+                        process.communicate(),
+                        timeout=self.timeout,
+                    )
+
+                # With progress callback
+                while True:
+                    try:
+                        # Wait for process with short timeout for progress checks
+                        stdout, stderr = await asyncio.wait_for(
+                            process.communicate(),
+                            timeout=heartbeat_interval,
+                        )
+                        return stdout, stderr
+                    except asyncio.TimeoutError:
+                        # Process still running, emit progress
+                        elapsed = time.monotonic() - start_time
+                        progress_callback(int(elapsed), self.timeout)
+                        continue
+
+            stdout, stderr = await run_with_progress()
 
             if process.returncode != 0:
                 error_msg = stderr.decode() if stderr else "Unknown error"
@@ -742,6 +776,7 @@ class MultiProviderClient:
         max_tokens: int = 4096,
         temperature: float = 0.0,
         component: CostComponent = CostComponent.ROOT_PROMPT,
+        progress_callback: ProgressCallback | None = None,
     ) -> APIResponse:
         """Get completion, routing to appropriate provider."""
         model = model or self.default_model
@@ -754,6 +789,7 @@ class MultiProviderClient:
             max_tokens=max_tokens,
             temperature=temperature,
             component=component,
+            progress_callback=progress_callback,
         )
 
     async def complete_streaming(
@@ -869,6 +905,7 @@ __all__ = [
     "MODEL_REGISTRY",
     "MultiProviderClient",
     "OpenAIClient",
+    "ProgressCallback",
     "Provider",
     "StreamChunk",
     "get_client",
