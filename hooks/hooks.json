@@ -27,6 +27,32 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/sync_context.sh",
+            "timeout": 5000,
+            "description": "Sync context before tool execution"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/capture_output.sh",
+            "timeout": 5000,
+            "description": "Capture tool output after execution"
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "matcher": ".*",

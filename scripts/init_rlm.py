@@ -6,15 +6,19 @@ Called by: hooks/hooks.json SessionStart
 """
 
 import json
+import os
 import sys
 from pathlib import Path
+
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def init_rlm():
     """Initialize RLM configuration and state."""
     config_dir = Path.home() / ".claude"
     config_dir.mkdir(exist_ok=True)
-    
+
     config_file = config_dir / "rlm-config.json"
     
     # Create default config if not exists
@@ -64,7 +68,20 @@ def init_rlm():
     # Create trajectories directory
     trajectories_dir = config_dir / "rlm-trajectories"
     trajectories_dir.mkdir(exist_ok=True)
-    
+
+    # Initialize StatePersistence session
+    try:
+        from src.state_persistence import get_persistence
+
+        persistence = get_persistence()
+        session_id = os.environ.get("CLAUDE_SESSION_ID", "default")
+        persistence.init_session(session_id)
+        print(f"RLM session initialized: {session_id}", file=sys.stderr)
+    except ImportError as e:
+        print(f"StatePersistence not available: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"Failed to initialize session: {e}", file=sys.stderr)
+
     print("RLM initialized", file=sys.stderr)
 
 
