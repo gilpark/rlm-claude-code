@@ -43,8 +43,12 @@ import argparse
 import asyncio
 import json
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
+
+# Suppress third-party deprecation warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
 
 
 def get_state_dir() -> Path:
