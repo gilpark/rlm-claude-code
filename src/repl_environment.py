@@ -8,11 +8,15 @@ Implements: Spec SPEC-14.03-14.04 for micro mode restrictions
 from __future__ import annotations
 
 import json
+import os as _os
 import re
 import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
+
+# For REPL access
+import hashlib as _hashlib
 
 from RestrictedPython import compile_restricted, safe_builtins
 from RestrictedPython.Eval import default_guarded_getiter
@@ -174,6 +178,8 @@ class RLMEnvironment:
             # Standard library (safe modules)
             "re": re,
             "json": json,
+            "hashlib": _hashlib,  # For hash verification
+            "os": _os,  # For file size operations
         }
 
         # Add helper functions based on access level (SPEC-14.03-14.04)

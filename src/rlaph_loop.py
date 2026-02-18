@@ -288,7 +288,7 @@ class RLAPHLoop:
                     state.messages.append(
                         {
                             "role": "user",
-                            "content": f"REPL output:\n```\n{truncated_result}\n```\n\nContinue your analysis or provide FINAL: <answer>",
+                            "content": f"[SYSTEM - Code execution result]:\n```\n{truncated_result}\n```\n\nNow provide your FINAL: <answer> based on these results.",
                         }
                     )
 
@@ -381,49 +381,45 @@ class RLAPHLoop:
         """Build system prompt with REPL instructions."""
         return """You are an RLM (Recursive Language Model) agent with access to a REAL Python REPL.
 
-CRITICAL: You have a REAL Python environment, not a simulated one. When you write code in ```python blocks, it ACTUALLY EXECUTES and you will see the REAL output.
+CRITICAL RULES:
+1. When you write code in ```python blocks, the system EXECUTES it and returns REAL output
+2. DO NOT generate fake "REPL output" or "Human:" messages yourself
+3. DO NOT pretend to see execution results - wait for the actual system response
+4. After writing code, STOP and wait for the [SYSTEM - Code execution result]
+5. When you have the final answer, write: FINAL: <answer>
 
 Your workflow:
-1. Write Python code in ```python blocks to interact with files and data
-2. The system executes your code and returns the ACTUAL output
-3. Read the output, then write more code or provide your final answer
-4. When done, write FINAL: <answer> OUTSIDE the code block
+1. Write Python code in ```python blocks
+2. STOP - the system will execute and return [SYSTEM - Code execution result]
+3. Read the REAL output from the system
+4. Write more code OR provide FINAL: <answer>
 
-File Access Functions (Context Externalization):
-Files are NOT in the prompt (would exceed token limits). Read them on-demand:
+File Access Functions:
 - `read_file(path, offset=0, limit=2000)`: Read file content from disk
-- `glob_files(pattern)`: Find files matching pattern (returns list of paths)
+- `glob_files(pattern)`: Find files matching pattern
 - `grep_files(pattern, path)`: Search for pattern in files
 - `list_dir(path)`: List directory contents
 
-Example interaction:
-```
-User: How many Python files are in src/?
+Example:
+User: How many Python files in src/?
 
 Your response:
 ```python
 files = glob_files("src/**/*.py")
-print(f"Found {len(files)} files")
+print(len(files))
+```
+[STOP HERE - wait for system to execute]
+
+System returns: [SYSTEM - Code execution result]:
+```
+81
 ```
 
-System returns: Found 81 files
-
-Now you know the answer:
+Now you can answer:
 FINAL: There are 81 Python files in src/
-```
 
-Other helper functions:
-- `peek(var, start, end)`: View a slice of a variable
-- `search(var, pattern)`: Search for patterns in a variable
-- `summarize(var, max_tokens)`: Summarize content using LLM
-- `llm(query, context)`: Make a recursive LLM call (returns actual result)
-- `llm_batch(queries)`: Execute multiple LLM queries in parallel
-- `map_reduce(content, map_p, reduce_p)`: Process content in chunks
-
-Working memory:
-- `working_memory`: Dict for storing intermediate results across code blocks
-
-IMPORTANT: Write code, see output, then provide FINAL: answer. Do NOT guess."""
+Other functions: peek(), search(), summarize(), llm(), llm_batch(), map_reduce()
+Working memory: working_memory dict for storing results across code blocks"""
 
     def _get_model_for_depth(self) -> str:
         """Get appropriate model for current depth."""
@@ -449,13 +445,18 @@ IMPORTANT: Write code, see output, then provide FINAL: answer. Do NOT guess."""
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            # Use clear markers that won't confuse LLM into generating fake turns
             if role == "user":
-                parts.append(f"Human: {content}")
+                # Check if this is a system message (code execution result)
+                if content.startswith("[SYSTEM"):
+                    parts.append(content)  # Don't add prefix for system messages
+                else:
+                    parts.append(f"User query:\n{content}")
             elif role == "assistant":
-                parts.append(f"Assistant: {content}")
+                parts.append(f"Your response:\n{content}")
             else:
                 parts.append(f"{role}: {content}")
-        return "\n\n".join(parts)
+        return "\n\n---\n\n".join(parts)
 
 
 __all__ = [
