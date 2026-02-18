@@ -36,6 +36,7 @@ class Provider(Enum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    CLAUDE_CLI = "claude_cli"  # Claude Code CLI (subscription auth)
 
 
 @dataclass
@@ -70,6 +71,10 @@ MODEL_REGISTRY: dict[str, tuple[Provider, str]] = {
     "claude-opus-4-5-20251101": (Provider.ANTHROPIC, "claude-opus-4-5-20251101"),
     "claude-sonnet-4-20250514": (Provider.ANTHROPIC, "claude-sonnet-4-20250514"),
     "claude-haiku-4-5-20251001": (Provider.ANTHROPIC, "claude-haiku-4-5-20251001"),
+    # Claude CLI models (subscription auth, same model names)
+    "cli:opus": (Provider.CLAUDE_CLI, "opus"),
+    "cli:sonnet": (Provider.CLAUDE_CLI, "sonnet"),
+    "cli:haiku": (Provider.CLAUDE_CLI, "haiku"),
     # OpenAI GPT-5.2 models
     "gpt-5.2": (Provider.OPENAI, "gpt-5.2"),
     "gpt-5.2-pro": (Provider.OPENAI, "gpt-5.2-pro"),
@@ -366,6 +371,269 @@ class OpenAIClient(BaseLLMClient):
         )
 
 
+class ClaudeHeadlessClient(BaseLLMClient):
+    """
+    Claude CLI subprocess client using subscription auth.
+
+    Implements: Spec §5 Model Integration (subscription-based)
+
+    Uses `claude -p` for non-interactive completions. This allows
+    RLM recursion without requiring ANTHROPIC_API_KEY - it uses
+    the user's Claude Max/Pro subscription instead.
+
+    Key features:
+    - No API key required (uses subscription auth)
+    - Supports model selection (opus/sonnet/haiku)
+    - Returns structured JSON with cost tracking
+    - Isolated subprocess per call (no shared state)
+    """
+
+    def __init__(
+        self,
+        cost_tracker: CostTracker | None = None,
+        cli_path: str | None = None,
+        timeout: float = 600.0,  # 10 minutes for complex queries
+    ):
+        """
+        Initialize Claude CLI client.
+
+        Args:
+            cost_tracker: Cost tracker instance
+            cli_path: Path to claude CLI (default: auto-detect)
+            timeout: Timeout for subprocess in seconds
+        """
+        self.cost_tracker = cost_tracker or get_cost_tracker()
+        self.cli_path = cli_path or self._find_cli()
+        self.timeout = timeout
+
+        if not self.cli_path:
+            raise ValueError(
+                "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+            )
+
+    def _find_cli(self) -> str | None:
+        """Find claude CLI in PATH."""
+        import shutil
+        return shutil.which("claude")
+
+    def _build_prompt(
+        self,
+        messages: list[dict[str, str]],
+        system: str | None = None,
+    ) -> str:
+        """Build prompt string from messages."""
+        parts = []
+
+        if system:
+            parts.append(f"System: {system}\n")
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                parts.append(f"System: {content}\n")
+            elif role == "user":
+                parts.append(f"User: {content}\n")
+            elif role == "assistant":
+                parts.append(f"Assistant: {content}\n")
+
+        return "\n".join(parts).strip()
+
+    def _resolve_model(self, model: str | None) -> str:
+        """Resolve model to CLI-compatible name (opus/sonnet/haiku)."""
+        if model is None:
+            return "sonnet"
+
+        # Already a valid CLI model
+        if model in ("opus", "sonnet", "haiku"):
+            return model
+
+        # Map full model names to shortcuts
+        if "opus" in model:
+            return "opus"
+        elif "sonnet" in model:
+            return "sonnet"
+        elif "haiku" in model:
+            return "haiku"
+
+        # Default to sonnet for unknown models
+        return "sonnet"
+
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        system: str | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        component: CostComponent = CostComponent.ROOT_PROMPT,
+    ) -> APIResponse:
+        """Get completion via Claude CLI subprocess."""
+        import asyncio
+        import json
+
+        model = self._resolve_model(model)
+        prompt = self._build_prompt(messages, system)
+
+        # Build CLI command
+        cmd = [
+            self.cli_path,
+            "-p",
+            "--no-session-persistence",
+            f"--model={model}",
+            "--output-format=json",
+            prompt,
+        ]
+
+        # Create subprocess with CLAUDECODE unset to allow nested execution
+        env = dict(os.environ)
+        env.pop("CLAUDECODE", None)  # Unset to bypass nested session check
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.timeout,
+            )
+
+            if process.returncode != 0:
+                error_msg = stderr.decode() if stderr else "Unknown error"
+                raise RuntimeError(f"Claude CLI failed: {error_msg}")
+
+            # Parse JSON response
+            result = json.loads(stdout.decode())
+
+            # Extract fields
+            content = result.get("result", "")
+            usage = result.get("usage", {})
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            cost_usd = result.get("total_cost_usd", 0.0)
+
+            # Record cost
+            self.cost_tracker.record_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=model,
+                component=component,
+            )
+
+            return APIResponse(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=model,
+                provider=Provider.CLAUDE_CLI,
+                stop_reason=result.get("stop_reason"),
+                metadata={
+                    "cost_usd": cost_usd,
+                    "duration_ms": result.get("duration_ms"),
+                    "session_id": result.get("session_id"),
+                },
+            )
+
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Claude CLI timed out after {self.timeout}s")
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Failed to parse Claude CLI output: {e}")
+
+    async def complete_streaming(
+        self,
+        messages: list[dict[str, str]],
+        system: str | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        component: CostComponent = CostComponent.ROOT_PROMPT,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        """
+        Streaming completion via Claude CLI.
+
+        Note: Uses --output-format=stream-json for real-time output.
+        """
+        import asyncio
+        import json
+
+        model = self._resolve_model(model)
+        prompt = self._build_prompt(messages, system)
+
+        cmd = [
+            self.cli_path,
+            "-p",
+            "--no-session-persistence",
+            f"--model={model}",
+            "--output-format=stream-json",
+            prompt,
+        ]
+
+        env = dict(os.environ)
+        env.pop("CLAUDECODE", None)
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+
+            input_tokens = 0
+            output_tokens = 0
+
+            # Read streaming output
+            while True:
+                line = await asyncio.wait_for(
+                    process.stdout.readline(),
+                    timeout=self.timeout,
+                )
+
+                if not line:
+                    break
+
+                try:
+                    chunk = json.loads(line.decode())
+                    chunk_type = chunk.get("type", "")
+
+                    if chunk_type == "content":
+                        # Text chunk
+                        text = chunk.get("content", "")
+                        if text:
+                            yield StreamChunk(text=text)
+                    elif chunk_type == "result":
+                        # Final result
+                        input_tokens = chunk.get("usage", {}).get("input_tokens", 0)
+                        output_tokens = chunk.get("usage", {}).get("output_tokens", 0)
+
+                except json.JSONDecodeError:
+                    continue
+
+            await process.wait()
+
+            # Record cost
+            self.cost_tracker.record_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=model,
+                component=component,
+            )
+
+            yield StreamChunk(
+                text="",
+                is_final=True,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Claude CLI streaming timed out after {self.timeout}s")
+
+
 class MultiProviderClient:
     """
     Unified LLM client that routes to appropriate provider.
@@ -379,6 +647,7 @@ class MultiProviderClient:
         anthropic_key: str | None = None,
         openai_key: str | None = None,
         cost_tracker: CostTracker | None = None,
+        prefer_cli: bool = False,
     ):
         """
         Initialize multi-provider client.
@@ -388,12 +657,23 @@ class MultiProviderClient:
             anthropic_key: Anthropic API key
             openai_key: OpenAI API key
             cost_tracker: Cost tracker instance
+            prefer_cli: Prefer Claude CLI over API even if keys available
         """
         self.cost_tracker = cost_tracker or get_cost_tracker()
         self.default_model = default_model
         self._clients: dict[Provider, BaseLLMClient] = {}
+        self.prefer_cli = prefer_cli
 
-        # Initialize available clients
+        # Try Claude CLI first if prefer_cli is set
+        if prefer_cli:
+            try:
+                self._clients[Provider.CLAUDE_CLI] = ClaudeHeadlessClient(
+                    cost_tracker=self.cost_tracker
+                )
+            except ValueError:
+                pass  # CLI not available
+
+        # Initialize API clients
         try:
             self._clients[Provider.ANTHROPIC] = AnthropicClient(
                 api_key=anthropic_key, cost_tracker=self.cost_tracker
@@ -408,22 +688,51 @@ class MultiProviderClient:
         except ValueError:
             pass  # No OpenAI key available
 
+        # Try Claude CLI as fallback if no API keys
+        if Provider.CLAUDE_CLI not in self._clients:
+            try:
+                self._clients[Provider.CLAUDE_CLI] = ClaudeHeadlessClient(
+                    cost_tracker=self.cost_tracker
+                )
+            except ValueError:
+                pass  # CLI not available
+
         if not self._clients:
             raise ValueError(
-                "At least one API key required. Set ANTHROPIC_API_KEY or OPENAI_API_KEY."
+                "No LLM provider available. Options:\n"
+                "1. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable\n"
+                "2. Install Claude CLI: npm install -g @anthropic-ai/claude-code"
             )
 
     def _get_client(self, model: str) -> tuple[BaseLLMClient, str]:
         """Get appropriate client for model."""
         provider, full_model = resolve_model(model)
 
+        # If requested provider not available, try fallbacks
         if provider not in self._clients:
-            available = list(self._clients.keys())
-            raise ValueError(
-                f"No client for {provider.value}. Available: {[p.value for p in available]}"
-            )
+            # For Anthropic models, fall back to CLI if available
+            if provider == Provider.ANTHROPIC and Provider.CLAUDE_CLI in self._clients:
+                provider = Provider.CLAUDE_CLI
+                full_model = self._get_cli_model_name(full_model)
+            else:
+                available = list(self._clients.keys())
+                raise ValueError(
+                    f"No client for {provider.value}. Available: {[p.value for p in available]}"
+                )
 
         return self._clients[provider], full_model
+
+    def _get_cli_model_name(self, model: str) -> str:
+        """Convert model name to CLI shortcut (opus/sonnet/haiku)."""
+        if model in ("opus", "sonnet", "haiku"):
+            return model
+        if "opus" in model:
+            return "opus"
+        elif "sonnet" in model:
+            return "sonnet"
+        elif "haiku" in model:
+            return "haiku"
+        return "sonnet"  # Default
 
     async def complete(
         self,
@@ -556,6 +865,7 @@ __all__ = [
     "AnthropicClient",
     "BaseLLMClient",
     "ClaudeClient",
+    "ClaudeHeadlessClient",
     "MODEL_REGISTRY",
     "MultiProviderClient",
     "OpenAIClient",

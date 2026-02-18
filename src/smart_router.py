@@ -587,8 +587,13 @@ class SmartRouter:
         candidates = self._get_candidates(classification)
 
         # Filter by available providers
+        # Treat CLAUDE_CLI as ANTHROPIC for model selection
+        effective_providers = set(self.available_providers)
+        if Provider.CLAUDE_CLI in effective_providers:
+            effective_providers.add(Provider.ANTHROPIC)
+
         candidates = [
-            m for m in candidates if MODEL_CATALOG[m].provider in self.available_providers
+            m for m in candidates if MODEL_CATALOG[m].provider in effective_providers
         ]
 
         # Filter by forced provider
@@ -608,7 +613,7 @@ class SmartRouter:
         # Ensure we have at least one candidate
         if not candidates:
             candidates = (
-                ["sonnet"] if Provider.ANTHROPIC in self.available_providers else ["gpt-4o"]
+                ["sonnet"] if Provider.ANTHROPIC in effective_providers else ["gpt-4o"]
             )
 
         primary = candidates[0]

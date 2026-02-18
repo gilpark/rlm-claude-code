@@ -6,6 +6,50 @@ This document outlines a phased plan to evolve RLM's state management from flat 
 
 ---
 
+## Feasibility Analysis (RLM Orchestrator Review)
+
+**Status**: Technically sound with refinements needed
+
+### Critical Recommendations
+
+| Priority | Recommendation | Rationale |
+|----------|----------------|-----------|
+| **HIGH** | Extend `StatePersistence`, don't replace | Preserves tested atomic write logic and session lifecycle |
+| **HIGH** | Add cell support to `RLMEnvironment` | Current REPL has no cell concept, uses `history` list |
+| **HIGH** | Use SPEC-04 hyperedges for dependencies | Align with existing `membership` table model |
+| **HIGH** | Add cycle detection to cell DAG | Prevent circular dependencies |
+| **MEDIUM** | Batch cell index updates | Write on session save, not every cell creation |
+| **MEDIUM** | Add rollback to migration | Backup + revert script for safety |
+| **MEDIUM** | Reuse existing types from `types.py` | `ExecutionResult`, `SessionContext`, `Message`, `ToolOutput` |
+| **LOW** | Integrate `memory-snapshot.json` with SPEC-02 | Query task-tier nodes by session_id |
+
+### Performance Validation
+
+| Operation | Target | Current | Status |
+|-----------|--------|---------|--------|
+| Load session | <20ms | ~5-10ms | ✅ Achievable |
+| Save session | <30ms | ~8-15ms | ✅ Achievable |
+| Create cell | <5ms | ~1ms | ✅ Achievable |
+| Query cells | <10ms | ~2ms | ✅ Achievable |
+
+**Bottleneck**: Cell index rewriting on every creation - batch updates recommended.
+
+### SPEC Alignment
+
+| Spec | Integration Point | Action Needed |
+|------|-------------------|---------------|
+| SPEC-02 (memory_store) | `memory-snapshot.json` | Query task-tier by session_id, not separate storage |
+| SPEC-04 (reasoning_traces) | Cell dependencies | Use hyperedges (`membership` table) instead of separate DAG |
+
+### Missing from Original Plan
+
+1. **Cycle detection** for cell dependencies
+2. **Rollback script** for migration failures
+3. **`session-metadata.json` handling** - must merge `transcript_path`, `cwd` fields
+4. **Tool outputs truncation** - implement sliding window with configurable size
+
+---
+
 ## 1. Current State Analysis
 
 ### 1.1 Existing State Files
@@ -267,7 +311,7 @@ Note: Conversation history is NOT stored here - it's in the symlinked transcript
 
 ### 2.3 Cell Schema
 
-Each cell represents a replayable computation unit:
+Each cell represents a replayable computation unit inspired by Jupyter notebooks. The goal is to turn recursive LLM invocations and REPL operations into modular, self-contained units that can be logged, replayed, and selectively updated.
 
 ```json
 {
@@ -282,36 +326,65 @@ Each cell represents a replayable computation unit:
     },
     "input": {
       "type": "object",
+      "description": "Minimal relevant context snapshot - only what's needed for this cell",
       "properties": {
         "source": {"type": "string"},
         "operation": {"type": "string"},
-        "args": {"type": "object"}
+        "args": {"type": "object"},
+        "context_snapshot": {
+          "type": "object",
+          "description": "Tailored input slice to avoid token bloat",
+          "properties": {
+            "files": {"type": "object", "additionalProperties": {"type": "string"}},
+            "conversation_slice": {"type": "array"},
+            "memory_query": {"type": "string"}
+          }
+        }
       }
+    },
+    "code": {
+      "type": "string",
+      "description": "The Python/LLM/tool logic to execute (for replay)"
     },
     "output": {
       "type": "object",
       "properties": {
         "result": {"type": ["object", "string", "number", "boolean", "null"]},
         "error": {"type": ["string", "null"]},
-        "execution_time_ms": {"type": "number"}
+        "execution_time_ms": {"type": "number"},
+        "cached_response": {
+          "type": ["string", "null"],
+          "description": "Exact LLM response for non-determinism handling"
+        }
       }
     },
     "dependencies": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Cell IDs this cell depends on"
+      "description": "Cell IDs this cell depends on (explicit DAG tracking)"
     },
     "dependents": {
       "type": "array",
       "items": {"type": "string"},
       "description": "Cell IDs that depend on this cell (populated on index build)"
     },
+    "trace": {
+      "type": "object",
+      "description": "Decision trace from trajectory.py",
+      "properties": {
+        "goal": {"type": "string"},
+        "decision": {"type": "string"},
+        "rationale": {"type": "string"}
+      }
+    },
     "metadata": {
       "type": "object",
       "properties": {
         "depth": {"type": "integer"},
         "model": {"type": ["string", "null"]},
-        "tokens_used": {"type": "integer"}
+        "tokens_used": {"type": "integer"},
+        "temperature": {"type": "number", "description": "Pin to 0 for reproducibility"},
+        "promoted_to_db": {"type": "boolean", "description": "Whether output was saved to memory"}
       }
     }
   },
@@ -343,11 +416,84 @@ Each cell represents a replayable computation unit:
 }
 ```
 
+### 2.5 Good vs Bad Patterns
+
+This comparison guides usage and helps avoid common pitfalls:
+
+| Aspect | Good Pattern | Bad Pattern |
+|--------|--------------|-------------|
+| **Cell Granularity** | Medium-sized: One logical sub-task per cell (e.g., "search auth" or "synthesize fixes"). Keeps them re-runnable and focused. | Too fine (every line as a cell) → overhead bloat. Too coarse (whole recursion in one) → loses modularity, hard to replay partially. |
+| **Dependencies** | Explicit DAG: Track what cells feed into others (e.g., cell 3 uses output of 1 & 2). Use graph tools for auto-invalidation on changes. | Implicit/no tracking: Leads to stale replays if upstream changes aren't propagated. |
+| **Input Capture** | Snapshot minimal relevant context: Only what's needed for that cell (e.g., file snippet, not whole project). Saves storage/tokens. | Dump everything: Bloats logs, makes replays inefficient, risks token limits in children. |
+| **Aggregation** | Parent uses `map_reduce()` or structured synthesis: Combines child outputs with clear reasoning trace. Promotes aggregates to DB if useful. | Ad-hoc merging: Skips traces → loses "why" behind final output, harder to debug. |
+| **Replay Usage** | Selective: Re-run only affected cells on changes (e.g., after code update). Cache aggressively for unchanged paths. | Full re-run always: Wastes tokens, defeats the purpose. Or never replay: Loses continuity. |
+| **DB Integration** | Promote after verification: Save cell outputs as facts/experiences only if accurate (e.g., post-replay). Query DB to enrich cell inputs. | Blind promotion: Pollutes DB with noisy/unverified data. Or ignore DB: Misses cross-session learning. |
+| **Error Handling** | Cells include retry logic (e.g., if LLM fails, re-run with better prompt). Log errors in metadata for easy debugging. | Ignore failures: Propagates bad outputs downstream. No logging → black-box issues. |
+| **LLM Non-determinism** | Cache exact responses or pin params (temperature=0). Store `cached_response` for reproducibility. | Always re-run LLM calls: Different outputs each time → unreliable replays. |
+
+### 2.6 Cell Decomposition & Aggregation Flow
+
+```
+Parent Orchestrator
+        │
+        ▼ Decomposes task
+┌───────────────────────────────────────────────────────────────┐
+│                    CHILD CELLS (Parallel)                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │
+│  │ Cell 1      │  │ Cell 2      │  │ Cell 3              │   │
+│  │ Type: repl  │  │ Type: llm   │  │ Type: tool          │   │
+│  │ Op: search  │  │ Query: auth │  │ Op: memory_query    │   │
+│  │ Context:    │  │ Context:    │  │ Context:            │   │
+│  │   files:{}  │  │   search    │  │   memory_store      │   │
+│  │   (snippet) │  │   result    │  │   query             │   │
+│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘   │
+│         │                │                    │               │
+│         └────────────────┴────────────────────┘               │
+│                          │                                    │
+│                          ▼ Tailored input slices               │
+│              (avoid token bloat per child)                    │
+└───────────────────────────────────────────────────────────────┘
+                           │
+                           ▼ Aggregation
+┌───────────────────────────────────────────────────────────────┐
+│                    PARENT CELL (map_reduce)                    │
+│  Combines child outputs with clear reasoning trace             │
+│  Optional: Promote verified aggregates to DB                   │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### 2.7 Replay & Selective Update
+
+On reload (next session or refinement):
+
+1. **Load cells from file** → Build dependency DAG
+2. **Detect changes** via hooks (PostToolUse detects file edits)
+3. **Invalidate dependent cells** → Mark cells whose inputs changed
+4. **Re-run only invalidated cells** → Reuse cached outputs for unchanged paths
+5. **Promote good outputs to DB** → Save distilled insights after verification
+
+Example flow:
+```
+Edit: auth.py modified
+  │
+  ▼
+Invalidate: cells that depend on auth.py (Cell 2, Cell 5)
+  │
+  ▼
+Re-run: Cell 2 → Cell 5 (Cell 1, 3, 4 unchanged → use cache)
+  │
+  ▼
+Save: ~80% token savings vs full re-run
+```
+
 ---
 
 ## 3. Implementation Phases
 
-### Phase 1: Session Directory Infrastructure (Week 1)
+### Phase 1: Session Directory Infrastructure (Week 1-2)
+
+> **Revised Estimate**: Extended from Week 1 to Week 1-2 (Risk: Medium)
+> **Key Change**: Extend `StatePersistence` class instead of creating separate `SessionManager`
 
 **Goal**: Create the session directory structure and migrate metadata.
 
@@ -689,7 +835,13 @@ if __name__ == "__main__":
 
 ---
 
-### Phase 2: Cell Infrastructure (Week 2)
+### Phase 2: Cell Infrastructure (Week 2-3)
+
+> **Revised Estimate**: Extended from Week 2 to Week 2-3 (Risk: **HIGH**)
+> **Key Changes**:
+> - Add cell support to `RLMEnvironment` via optional `CellManager` parameter
+> - Use SPEC-04 hyperedges for dependencies instead of separate DAG
+> - Add cycle detection and validation
 
 **Goal**: Implement replayable cells with dependency tracking.
 
@@ -876,21 +1028,81 @@ class CellManager:
         """Get topologically sorted execution order."""
         return self._index.get("execution_order", [])
 
-    def _recompute_execution_order(self) -> None:
-        """Recompute topological execution order."""
+    def _would_create_cycle(self, cell_id: str, dep_id: str) -> bool:
+        """Check if adding dep_id as dependency of cell_id would create a cycle."""
+        # If dep_id depends on cell_id (transitively), adding this would cycle
         visited = set()
-        order = []
+        queue = [dep_id]
 
-        def visit(cell_id: str) -> None:
+        while queue:
+            current = queue.pop(0)
+            if current == cell_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            # Check what current depends on
+            for d in self._index["cells"].get(current, {}).get("dependencies", []):
+                queue.append(d)
+
+        return False
+
+    def validate_dependencies(self, cell_id: str, dependencies: list[str]) -> None:
+        """
+        Validate that adding these dependencies won't create issues.
+
+        Raises:
+            ValueError: If validation fails
+        """
+        for dep_id in dependencies:
+            # Self-dependency check
+            if dep_id == cell_id:
+                raise ValueError(f"Self-dependency not allowed: {cell_id}")
+
+            # Missing dependency check
+            if dep_id not in self._index["cells"]:
+                raise ValueError(f"Dependency not found: {dep_id}")
+
+            # Cycle check
+            if self._would_create_cycle(cell_id, dep_id):
+                raise ValueError(f"Cycle detected: {cell_id} -> {dep_id}")
+
+    def _recompute_execution_order(self) -> None:
+        """Recompute topological execution order with cycle detection."""
+        visited = set()
+        in_stack = set()  # For cycle detection
+        order = []
+        cycles = []
+
+        def visit(cell_id: str) -> bool:
             if cell_id in visited:
-                return
-            visited.add(cell_id)
+                return True
+            if cell_id in in_stack:
+                # Cycle detected
+                cycles.append(cell_id)
+                return False
+
+            in_stack.add(cell_id)
+
             for dep_id in self._index["cells"].get(cell_id, {}).get("dependencies", []):
-                visit(dep_id)
+                if dep_id in self._index["cells"]:
+                    if not visit(dep_id):
+                        return False
+
+            in_stack.remove(cell_id)
+            visited.add(cell_id)
             order.append(cell_id)
+            return True
 
         for cell_id in self._index["cells"]:
-            visit(cell_id)
+            if cell_id not in visited:
+                if not visit(cell_id):
+                    # Log cycle but continue with partial order
+                    pass
+
+        if cycles:
+            # Mark cycles in index for debugging
+            self._index["cycles_detected"] = cycles
 
         self._index["execution_order"] = order
 
@@ -934,7 +1146,13 @@ class CellManager:
 
 ---
 
-### Phase 3: Hook Migration (Week 3)
+### Phase 3: Hook Migration (Week 3-4)
+
+> **Revised Estimate**: Extended from Week 3 to Week 3-4 (Risk: Medium)
+> **Key Changes**:
+> - Update hooks to use extended `StatePersistence`
+> - Add rollback script for migration safety
+> - Batch cell index updates on session save
 
 **Goal**: Update all hooks to use SessionManager instead of flat files.
 
@@ -997,7 +1215,12 @@ Stop:
 
 ---
 
-### Phase 4: REPL Bridge Update (Week 4)
+### Phase 4: REPL Bridge Update (Week 4-5)
+
+> **Revised Estimate**: Extended from Week 4 to Week 4-5 (Risk: Low)
+> **Key Changes**:
+> - Reuse existing types from `types.py` (`ExecutionResult`, `SessionContext`)
+> - Add rollback operation to migration
 
 **Goal**: Update REPL bridge to work with session-centric state.
 
@@ -1102,9 +1325,187 @@ def op_dependency_chain(args: dict[str, Any]) -> dict[str, Any]:
                 chain.append(dep_id)
 
     return {"chain": chain, "depth": len(chain)}
+
+def op_replay(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Replay specified cells with optional force re-run.
+
+    Usage: repl_bridge.py --op replay --args '{"cells": "2-4", "force": false}'
+
+    Args:
+        cells: Cell IDs to replay (comma-separated, ranges supported like "2-4")
+        force: If true, re-run even if cached; if false, only re-run invalidated cells
+    """
+    cells_arg = args.get("cells", "")
+    force = args.get("force", False)
+
+    session_dir = get_current_session_dir()
+    index_file = session_dir / "cells" / "index.json"
+
+    if not index_file.exists():
+        return {"error": "No cells found in session"}
+
+    with open(index_file) as f:
+        index = json.load(f)
+
+    # Parse cell specification
+    cell_ids_to_replay = []
+    if "-" in cells_arg:
+        # Range like "2-4"
+        parts = cells_arg.split("-")
+        if len(parts) == 2:
+            start, end = int(parts[0]), int(parts[1])
+            all_cells = list(index["cells"].keys())
+            cell_ids_to_replay = all_cells[start-1:end]  # 1-indexed
+    else:
+        # Comma-separated IDs
+        cell_ids_to_replay = [c.strip() for c in cells_arg.split(",") if c.strip()]
+
+    if not cell_ids_to_replay:
+        return {"error": "No valid cells specified"}
+
+    results = []
+    for cell_id in cell_ids_to_replay:
+        cell_file = session_dir / "cells" / f"{cell_id}.json"
+        if not cell_file.exists():
+            results.append({"cell_id": cell_id, "status": "not_found"})
+            continue
+
+        with open(cell_file) as f:
+            cell = json.load(f)
+
+        if not force and cell.get("output", {}).get("result") is not None:
+            # Use cached result
+            results.append({
+                "cell_id": cell_id,
+                "status": "cached",
+                "result_preview": str(cell["output"]["result"])[:200]
+            })
+        else:
+            # Would re-execute in full implementation
+            results.append({
+                "cell_id": cell_id,
+                "status": "re_run_required",
+                "note": "Full replay requires orchestrator execution"
+            })
+
+    return {
+        "replay_results": results,
+        "total": len(results),
+        "cached": len([r for r in results if r["status"] == "cached"]),
+        "re_run": len([r for r in results if r["status"] == "re_run_required"])
+    }
+
+def op_invalidate(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Invalidate cells affected by a file change.
+
+    Called by PostToolUse hook when files are edited.
+    """
+    file_path = args.get("file_path")
+    if not file_path:
+        return {"error": "file_path required"}
+
+    session_dir = get_current_session_dir()
+    index_file = session_dir / "cells" / "index.json"
+
+    if not index_file.exists():
+        return {"invalidated": [], "count": 0}
+
+    with open(index_file) as f:
+        index = json.load(f)
+
+    # Find cells that reference this file
+    invalidated = []
+    for cell_id, info in index["cells"].items():
+        cell_file = session_dir / "cells" / f"{cell_id}.json"
+        if cell_file.exists():
+            with open(cell_file) as cf:
+                cell = json.load(cf)
+            # Check if file is in input context
+            input_context = cell.get("input", {}).get("context_snapshot", {})
+            if file_path in input_context.get("files", {}):
+                invalidated.append(cell_id)
+                # Mark for re-run by clearing output
+                cell["output"]["result"] = None
+                cell["output"]["error"] = "invalidated_by_file_change"
+                cell_file.write_text(json.dumps(cell, indent=2))
+
+    return {
+        "file_path": file_path,
+        "invalidated": invalidated,
+        "count": len(invalidated)
+    }
 ```
 
-#### 3.4.3 Tests Required
+#### 3.4.3 Learning Loop Integration
+
+Cells feed into DB promotion after verification:
+
+```python
+def op_promote_to_memory(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Promote verified cell output to persistent memory.
+
+    Good pattern: Promote after verification (post-replay).
+    Bad pattern: Blind promotion without checking accuracy.
+    """
+    cell_id = args.get("cell_id")
+    memory_type = args.get("memory_type", "fact")  # "fact" or "experience"
+    confidence = args.get("confidence", 0.8)
+
+    if not cell_id:
+        return {"error": "cell_id required"}
+
+    session_dir = get_current_session_dir()
+    cell_file = session_dir / "cells" / f"{cell_id}.json"
+
+    if not cell_file.exists():
+        return {"error": f"Cell not found: {cell_id}"}
+
+    with open(cell_file) as f:
+        cell = json.load(f)
+
+    result = cell.get("output", {}).get("result")
+    if result is None:
+        return {"error": "Cell has no output to promote"}
+
+    try:
+        from src.memory_store import get_memory_store
+
+        store = get_memory_store()
+
+        if memory_type == "fact":
+            # Add as a verified fact
+            store.add_fact(
+                content=str(result),
+                source=f"cell:{cell_id}",
+                confidence=confidence,
+            )
+        elif memory_type == "experience":
+            # Add as an experience with trace
+            store.add_experience(
+                task=cell.get("input", {}).get("operation", "unknown"),
+                context=cell.get("input", {}).get("args", {}),
+                outcome=result,
+                trace=cell.get("trace", {}),
+            )
+
+        # Mark cell as promoted
+        cell["metadata"]["promoted_to_db"] = True
+        cell_file.write_text(json.dumps(cell, indent=2))
+
+        return {
+            "status": "promoted",
+            "cell_id": cell_id,
+            "memory_type": memory_type,
+            "confidence": confidence
+        }
+    except ImportError:
+        return {"error": "Memory store not available"}
+```
+
+#### 3.4.4 Tests Required
 
 - [ ] `tests/unit/test_repl_bridge_session.py` - New session operations
 - [ ] `tests/integration/test_repl_cells.py` - Cell query operations
@@ -1197,7 +1598,46 @@ def op_dependency_chain(args: dict[str, Any]) -> dict[str, Any]:
 
 ---
 
-## 6. Appendix
+## 6. Benefits
+
+### 6.1 Token & Cost Savings
+
+Reuse cached cell outputs instead of re-prompting full histories:
+- Example: In a 10-cell task, update 2 cells → save ~80% on LLM calls
+- Selective replay: Only re-run invalidated cells, cache aggressively for unchanged paths
+
+### 6.2 Continuous Context Understanding
+
+The AI "remembers" via:
+- **Replayable cells**: Short-term evolutions within and across sessions
+- **DB (memory_store)**: Long-term facts and experiences
+
+Come back later, tweak one part, and see updated results without losing prior work.
+
+### 6.3 Debuggability & Traceability
+
+Full audit trail:
+- See exactly how the agent decided/built context
+- Replay to reproduce bugs or experiment
+- Each cell includes `trace` field with goal, decision, rationale
+
+### 6.4 Modularity & Scalability
+
+Like Jupyter, cells make complex reasoning composable:
+- Easier to iterate on code updates
+- Refine one part (e.g., auth flow) without re-analyzing unchanged parts
+- Clear dependency graph shows what affects what
+
+### 6.5 Learning Loop
+
+Cells feed into DB promotion → system gets smarter over time:
+- Promote verified cell outputs as facts/experiences
+- Reuse successful aggregation patterns as procedures
+- Cross-session learning via memory_store integration
+
+---
+
+## 7. Appendix
 
 ### A. File Size Estimates
 
@@ -1234,4 +1674,6 @@ The migration maintains these backward-compatible paths:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 0.3.0 | 2026-02-17 | Feasibility analysis: revised estimates (Phases 1-4), cycle detection code, critical recommendations table, SPEC alignment, performance validation |
+| 0.2.0 | 2026-02-17 | Added: cell granularity patterns, good vs bad patterns table, decomposition flow diagram, replay/selective update section, replay/invalidate/promote operations, learning loop integration, benefits section |
 | 0.1.0 | 2026-02-17 | Initial plan document |

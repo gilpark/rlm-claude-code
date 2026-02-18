@@ -113,8 +113,14 @@ class RLMOrchestrator:
         Yields:
             TrajectoryEvents and final response
         """
-        # Check if RLM should activate
-        should_activate, self.activation_reason = should_activate_rlm(query, context)
+        # Check if RLM should activate (respect config activation mode)
+        rlm_mode_forced = self.config.activation.mode == "always"
+        simple_mode_forced = self.config.activation.mode == "manual" and not self.config.activation.fast_path_enabled
+        should_activate, self.activation_reason = should_activate_rlm(
+            query, context,
+            rlm_mode_forced=rlm_mode_forced,
+            simple_mode_forced=simple_mode_forced,
+        )
 
         if not should_activate:
             # Bypass RLM, return direct

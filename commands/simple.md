@@ -1,3 +1,19 @@
+---
+name: simple
+description: |
+  Bypass RLM mode for a simple operation.
+  Skips complexity analysis and executes directly.
+hooks:
+  # Set RLM bypass flag for this operation
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: 'cd "${CLAUDE_PLUGIN_ROOT}" && .venv/bin/python scripts/run_orchestrator.py --bypass'
+          timeout: 1000
+          description: "Set RLM bypass flag"
+---
+
 Bypass RLM mode for a simple operation.
 
 ## Usage

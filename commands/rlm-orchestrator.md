@@ -1,3 +1,19 @@
+---
+name: rlm-orchestrator
+description: |
+  Invoke the RLM orchestrator agent for complex context management tasks.
+  Bypasses complexity checking - RLM activates immediately.
+hooks:
+  # Validate orchestrator dependencies before running
+  PreToolUse:
+    - matcher: "*"
+      hooks:
+        - type: command
+          command: 'cd "${CLAUDE_PLUGIN_ROOT}" && .venv/bin/python scripts/run_orchestrator.py --validate'
+          timeout: 2000
+          description: "Validate orchestrator dependencies"
+---
+
 # RLM Orchestrator
 
 Invoke the RLM orchestrator agent for complex context management tasks.
@@ -18,31 +34,45 @@ Use this when you need:
 
 ## How It Works
 
-This command launches the RLM orchestrator as a Task agent with full tool access. The agent:
+This command runs the RLM orchestrator which:
 
-1. Loads context from `~/.claude/rlm-state/context.json`
-2. Uses REPL bridge for context operations (peek, search, summarize, llm)
+1. Loads context from `~/.claude/rlm-state/context.json` (written by hooks)
+2. Uses Claude CLI for LLM calls (no API key needed, uses subscription)
 3. Can spawn recursive sub-queries for deep analysis
 4. Manages depth budgets and model cascades (Opus → Sonnet → Haiku)
 
-## REPL Bridge
-
-The agent uses `scripts/repl_bridge.py` for real Python REPL operations:
+## Running the Orchestrator
 
 ```bash
-# Peek at context
-uv run python scripts/repl_bridge.py --op peek --args '{"var": "conversation", "start": 0, "end": 5}'
+# Basic usage
+uv run python scripts/run_orchestrator.py "analyze the auth module"
 
-# Search files
-uv run python scripts/repl_bridge.py --op search --args '{"var": "files", "pattern": "def auth"}'
+# With custom depth
+uv run python scripts/run_orchestrator.py --depth 3 "complex analysis task"
 
-# Get context keys
-uv run python scripts/repl_bridge.py --op context --args '{"action": "keys"}'
+# Verbose output
+uv run python scripts/run_orchestrator.py --verbose "debug this code"
+
+# View current context
+uv run python scripts/run_orchestrator.py --context
 ```
+
+## LLM Provider Selection
+
+The orchestrator automatically selects the best available provider:
+1. **Claude API** - If `ANTHROPIC_API_KEY` is set
+2. **OpenAI API** - If `OPENAI_API_KEY` is set
+3. **Claude CLI** - Default, uses your subscription (no API key needed)
 
 ## Instructions
 
-When this skill is invoked, use the Task tool to launch the RLM orchestrator agent:
+When this skill is invoked, run the orchestrator:
+
+```bash
+uv run python scripts/run_orchestrator.py "[user's task description]"
+```
+
+Or use the Task tool to launch the RLM orchestrator agent:
 
 ```
 Task(
@@ -51,8 +81,6 @@ Task(
   description="RLM orchestration"
 )
 ```
-
-The agent will receive the full conversation context and can use all available tools.
 
 ## Related
 

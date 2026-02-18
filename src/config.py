@@ -6,9 +6,15 @@ Implements: Spec §5.3 Router Configuration
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+
+def _filter_dataclass_fields(data: dict[str, Any], cls: type) -> dict[str, Any]:
+    """Filter dict to only include fields that exist in the dataclass."""
+    valid_fields = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in valid_fields}
 
 
 def _get_use_rlm_core() -> bool:
@@ -173,12 +179,12 @@ class RLMConfig:
         verification = VerificationConfig(**verification_data) if verification_data else VerificationConfig()
 
         return cls(
-            activation=ActivationConfig(**data.get("activation", {})),
-            depth=DepthConfig(**data.get("depth", {})),
-            hybrid=HybridConfig(**data.get("hybrid", {})),
-            trajectory=TrajectoryConfig(**data.get("trajectory", {})),
-            models=ModelConfig(**models_data),
-            cost_controls=CostConfig(**data.get("cost_controls", {})),
+            activation=ActivationConfig(**_filter_dataclass_fields(data.get("activation", {}), ActivationConfig)),
+            depth=DepthConfig(**_filter_dataclass_fields(data.get("depth", {}), DepthConfig)),
+            hybrid=HybridConfig(**_filter_dataclass_fields(data.get("hybrid", {}), HybridConfig)),
+            trajectory=TrajectoryConfig(**_filter_dataclass_fields(data.get("trajectory", {}), TrajectoryConfig)),
+            models=ModelConfig(**_filter_dataclass_fields(models_data, ModelConfig)),
+            cost_controls=CostConfig(**_filter_dataclass_fields(data.get("cost_controls", {}), CostConfig)),
             verification=verification,
         )
 
