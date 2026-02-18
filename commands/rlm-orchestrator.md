@@ -34,6 +34,17 @@ Main Claude:
   9. Report answer to user
 ```
 
+## Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--verbose` | `-v` | Print trajectory events and progress |
+| `--stream` | `-s` | Stream tokens in real-time (experimental) |
+| `--depth N` | `-d N` | Max recursion depth (default: 2) |
+| `--validate` | | Validate dependencies and exit |
+| `--status` | | Show RLM status and exit |
+| `--bypass` | | Set bypass flag |
+
 ## Instructions
 
 When this command is invoked, follow these steps:
@@ -66,7 +77,7 @@ Use Bash to run the Python script with the composed prompt:
 
 ```bash
 cd ${CLAUDE_PLUGIN_ROOT}
-uv run python scripts/run_orchestrator.py "<composed prompt>"
+uv run python scripts/run_orchestrator.py --verbose "<composed prompt>"
 ```
 
 ### Step 4: Report Answer
@@ -80,7 +91,9 @@ The Python script returns the answer. Report it to the user.
 3. **One Bash call** - Run Python script once with full prompt
 4. **Report only** - Don't analyze, just pass through the result
 
-## Example
+## Examples
+
+### Basic Usage
 
 User: `/rlm-orchestrator explain how context management works`
 
@@ -96,6 +109,34 @@ You:
    ```
 3. Run: `uv run python scripts/run_orchestrator.py "Task: ..."`
 4. Report the answer
+
+### With Verbose Output
+
+User: `/rlm-orchestrator --verbose analyze the auth flow`
+
+Shows trajectory events like:
+```
+[RLM] depth=0/2 • routing: unknown → sonnet
+[REASON] depth=0 tokens=5549
+[REPL] result = ...
+```
+
+### Direct Script Usage
+
+```bash
+# Verbose mode
+uv run python scripts/run_orchestrator.py --verbose "analyze auth"
+
+# With streaming (experimental)
+uv run python scripts/run_orchestrator.py --stream "explain architecture"
+
+# Custom depth
+uv run python scripts/run_orchestrator.py --depth 3 "complex analysis"
+
+# Utility commands
+uv run python scripts/run_orchestrator.py --status
+uv run python scripts/run_orchestrator.py --validate
+```
 
 ## Related
 
