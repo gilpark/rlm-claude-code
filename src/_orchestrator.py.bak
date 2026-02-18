@@ -599,6 +599,14 @@ class RLMOrchestrator:
         """
         Process deferred async operations from REPL execution.
 
+        .. deprecated::
+            This method is legacy-only. In RLAPH mode (default), `llm()` returns
+            actual results immediately via `llm_sync()` and never creates
+            DeferredOperation objects. This method is kept for backward compatibility
+            with legacy orchestrator mode (--legacy flag).
+
+            For new code, use RLAPHLoop which has synchronous `llm()` calls.
+
         Implements: Spec §4.2 Recursive Call Implementation (async/sync bridge)
 
         This handles:
@@ -610,6 +618,14 @@ class RLMOrchestrator:
 
         Uses RecursiveREPL when available for proper depth management and cost tracking.
         """
+        import warnings
+
+        warnings.warn(
+            "_process_deferred_operations is deprecated. Use RLAPHLoop with synchronous llm() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         ops, batches = repl.get_pending_operations()
 
         # Collect all operations for parallel execution

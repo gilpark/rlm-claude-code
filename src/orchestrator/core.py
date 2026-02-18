@@ -13,7 +13,6 @@ Contains:
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import re
@@ -90,7 +89,7 @@ from ..trajectory import (
     TrajectoryEventType,
     TrajectoryRenderer,
 )
-from ..types import DeferredOperation, SessionContext
+from ..types import SessionContext
 
 if TYPE_CHECKING:
     pass
@@ -377,35 +376,6 @@ class RLMOrchestrator:
                         exec_result.output if exec_result.success else f"Error: {exec_result.error}"
                     )
 
-                    # Process any deferred async operations
-                    if repl.has_pending_operations():
-                        async for event in self._process_deferred_operations(
-                            repl, client, state.depth, trajectory, recursive_handler
-                        ):
-                            yield event
-
-                        # Re-run code now that results are available in working_memory
-                        # Or format output to show deferred results
-                        deferred_results = []
-                        ops, batches = repl.get_pending_operations()
-                        for op in ops:
-                            if op.resolved:
-                                deferred_results.append(
-                                    f"{op.operation_id}: {str(op.result)[:200]}"
-                                )
-                        for batch in batches:
-                            if batch.resolved:
-                                deferred_results.append(
-                                    f"{batch.batch_id}: {len(batch.results)} results"
-                                )
-
-                        if deferred_results:
-                            repl_result = f"{repl_result}\n\nAsync results:\n" + "\n".join(
-                                deferred_results
-                            )
-
-                        repl.clear_pending_operations()
-
                     # Emit REPL result event
                     result_event = TrajectoryEvent(
                         type=TrajectoryEventType.REPL_RESULT,
@@ -683,107 +653,6 @@ class RLMOrchestrator:
             export_dir.mkdir(parents=True, exist_ok=True)
             filename = f"trajectory_{int(time.time())}.json"
             trajectory.export_json(str(export_dir / filename))
-
-    async def _process_deferred_operations(
-        self,
-        repl: RLMEnvironment,
-        client: ClaudeClient,
-        depth: int,
-        trajectory: StreamingTrajectory,
-        recursive_handler: RecursiveREPL | None = None,
-    ) -> AsyncIterator[TrajectoryEvent]:
-        """
-        Process deferred async operations from REPL execution.
-
-        Implements: Spec §4.2 Recursive Call Implementation (async/sync bridge)
-
-        This handles:
-        - Individual recursive_query/summarize operations
-        - Parallel batch operations (llm_batch)
-
-        All operations are executed in parallel with bounded concurrency (Semaphore(5))
-        to prevent API overload while maximizing throughput.
-
-        Uses RecursiveREPL when available for proper depth management and cost tracking.
-        """
-        ops, batches = repl.get_pending_operations()
-
-        # Collect all operations for parallel execution
-        all_ops: list[DeferredOperation] = list(ops)
-        for batch in batches:
-            all_ops.extend(batch.operations)
-
-        if not all_ops:
-            return
-
-        # Emit start event for parallel processing
-        total_ops = len(all_ops)
-        start_event = TrajectoryEvent(
-            type=TrajectoryEventType.RECURSE_START,
-            depth=depth + 1,
-            content=f"Parallel execution: {total_ops} operations (max 5 concurrent)",
-            metadata={
-                "individual_ops": len(ops),
-                "batch_ops": sum(len(b.operations) for b in batches),
-                "batch_count": len(batches),
-            },
-        )
-        await trajectory.emit(start_event)
-        yield start_event
-
-        # Bounded parallel execution with Semaphore(5)
-        semaphore = asyncio.Semaphore(5)
-
-        async def execute_op_bounded(op: DeferredOperation) -> tuple[str, str]:
-            """Execute operation with bounded concurrency."""
-            async with semaphore:
-                try:
-                    if recursive_handler:
-                        result = await recursive_handler.recursive_query(
-                            query=op.query,
-                            context=op.context,
-                            spawn_repl=op.spawn_repl,
-                        )
-                    else:
-                        result = await client.recursive_query(op.query, op.context)
-                    return op.operation_id, result
-                except Exception as e:
-                    return op.operation_id, f"[Error: {e}]"
-
-        # Execute all operations in parallel with bounded concurrency
-        results = await asyncio.gather(*[execute_op_bounded(op) for op in all_ops])
-
-        # Build result map
-        result_map: dict[str, str] = dict(results)
-
-        # Resolve individual operations
-        for op in ops:
-            result = result_map.get(op.operation_id, "[Missing result]")
-            repl.resolve_operation(op.operation_id, result)
-
-        # Resolve batches
-        for batch in batches:
-            batch_results = [
-                result_map.get(op.operation_id, "[Missing result]") for op in batch.operations
-            ]
-            repl.resolve_batch(batch.batch_id, batch_results)
-
-        # Emit completion event with cost summary
-        metadata: dict[str, Any] = {
-            "total_operations": total_ops,
-            "completed": len(results),
-        }
-        if recursive_handler:
-            metadata["cost_summary"] = recursive_handler.get_cost_summary()
-
-        end_event = TrajectoryEvent(
-            type=TrajectoryEventType.RECURSE_END,
-            depth=depth + 1,
-            content=f"Parallel execution complete: {len(results)}/{total_ops} operations",
-            metadata=metadata,
-        )
-        await trajectory.emit(end_event)
-        yield end_event
 
     async def _post_execution_memory_update(
         self,

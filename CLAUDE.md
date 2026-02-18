@@ -160,6 +160,7 @@ All phases complete:
 | 3 | Optimization | Complete |
 | 4 | Advanced Features | Complete |
 | 5 | Intelligent Orchestration | Complete |
+| 6 | RLAPH Loop Refactoring | Complete |
 
 SPEC implementations:
 
@@ -170,6 +171,20 @@ SPEC implementations:
 | SPEC-03 | Memory Evolution | Complete |
 | SPEC-04 | Reasoning Traces | Complete |
 | SPEC-05 | Enhanced Budget Tracking | Complete |
+
+### RLAPH Refactoring (2026-02)
+
+The RLAPH (Recursive Language Agent with Python Handler) refactoring is complete:
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| RLAPHLoop class | Complete | Clean loop with synchronous llm() |
+| llm_sync() method | Complete | Returns actual result immediately |
+| Context truncation | Complete | Added to API client |
+| Legacy CLI client removed | Complete | ~300 lines removed |
+| RLAPH default mode | Complete | --legacy flag for old behavior |
+
+**Key improvement**: `llm()` now returns actual string results immediately instead of `DeferredOperation`. This makes code simpler and debugging easier.
 
 ## Key Technologies
 

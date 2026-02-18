@@ -84,6 +84,18 @@ class ResponseParser:
                         reasoning="",
                     )
                 )
+                return results
+
+            # Also check for FINAL: answer after Python blocks
+            final_match = self.FINAL_ANSWER.search(response)
+            if final_match:
+                results.append(
+                    ParsedResponse(
+                        action=ResponseAction.FINAL_ANSWER,
+                        content=final_match.group(1).strip(),
+                        reasoning="",
+                    )
+                )
 
             return results
 

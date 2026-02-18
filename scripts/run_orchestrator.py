@@ -236,7 +236,6 @@ async def run_rlaph(
         Final answer from RLAPH loop
     """
     from src.rlaph_loop import RLAPHLoop
-    from src.config import RLMConfig
     from src.trajectory import TrajectoryRenderer
 
     # Build empty context - files are read by REPL as needed
@@ -268,75 +267,6 @@ async def run_rlaph(
     return result.answer
 
 
-async def run_orchestrator(
-    query: str,
-    depth: int = 2,
-    verbose: bool = False,
-    stream: bool = False,
-) -> str:
-    """
-    Run the RLM orchestrator on a query.
-
-    Args:
-        query: User query (includes task + file paths)
-        depth: Maximum recursion depth (default 2)
-        verbose: Print trajectory events
-        stream: Use streaming mode for real-time tokens
-
-    Returns:
-        Final answer from orchestrator
-    """
-    from src import RLMOrchestrator
-    from src.config import ActivationConfig, DepthConfig, RLMConfig
-    from src.trajectory import TrajectoryEventType
-
-    # Build empty context - files are read by REPL as needed
-    context_data = build_context(files={}, use_disk_fallback=False)
-    context = build_session_context(context_data)
-
-    if verbose:
-        print(f"[RLM] Starting orchestrator with query ({len(query)} chars)")
-        if stream:
-            print("[RLM] Streaming mode enabled")
-
-    # Configure depth and force always mode
-    config = RLMConfig(
-        depth=DepthConfig(max=depth),
-        activation=ActivationConfig(mode="always"),
-    )
-
-    # Create orchestrator
-    orchestrator = RLMOrchestrator(config=config)
-
-    # Run and collect result
-    final_answer = None
-    async for event in orchestrator.run(query, context):
-        if verbose:
-            if event.type == TrajectoryEventType.RLM_START:
-                print(f"[RLM] {event.content}")
-            elif event.type == TrajectoryEventType.REASON:
-                tokens = event.metadata.get('input_tokens', 0)
-                print(f"[REASON] depth={event.depth} tokens={tokens}")
-            elif event.type == TrajectoryEventType.STREAM:
-                # Print streaming tokens in real-time
-                print(event.content, end="", flush=True)
-            elif event.type == TrajectoryEventType.REPL_EXEC:
-                print(f"[REPL] {event.content[:100]}...")
-            elif event.type == TrajectoryEventType.RECURSE_START:
-                print(f"[RECURSE] {event.content}")
-            elif event.type == TrajectoryEventType.ERROR:
-                print(f"[ERROR] {event.content}")
-
-        if event.type == TrajectoryEventType.FINAL:
-            final_answer = event.content
-
-    # Add newline after streaming
-    if stream and verbose:
-        print()
-
-    return final_answer or "No answer produced"
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Run RLM orchestrator (uses Claude CLI if no API keys)",
@@ -361,8 +291,6 @@ Examples:
     parser.add_argument("--query", "-q", dest="query_flag", help="Query to process (alternative)")
     parser.add_argument("--depth", "-d", type=int, default=2, help="Max recursion depth (default: 2)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print trajectory events")
-    parser.add_argument("--stream", "-s", action="store_true", help="Stream tokens in real-time")
-    parser.add_argument("--legacy", action="store_true", help="Use legacy orchestrator (default: RLAPH)")
 
     # Utility commands
     parser.add_argument("--validate", action="store_true", help="Validate dependencies")
@@ -394,18 +322,11 @@ Examples:
     if not query:
         parser.error("Query required. Provide as argument or use --query")
 
-    # Run orchestrator (RLAPH is default, --legacy for old mode)
+    # Run RLAPH loop (clean synchronous llm() mode)
     try:
-        if args.legacy:
-            # Use legacy orchestrator
-            result = asyncio.run(
-                run_orchestrator(query, depth=args.depth, verbose=args.verbose, stream=args.stream)
-            )
-        else:
-            # Use RLAPH loop (default) - clean synchronous llm() mode
-            result = asyncio.run(
-                run_rlaph(query, depth=args.depth, verbose=args.verbose)
-            )
+        result = asyncio.run(
+            run_rlaph(query, depth=args.depth, verbose=args.verbose)
+        )
         print(result)
     except KeyboardInterrupt:
         print("\n[interrupted]")

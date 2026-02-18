@@ -73,6 +73,32 @@ def extract_functions(
     """Extract function definitions from code."""
 ```
 
+## Core REPL Functions
+
+The REPL also provides these core functions (from Phase 4 RLAPH refactoring):
+
+```python
+def llm(query: str, context: str = "") -> str:
+    """
+    Recursive LLM call - returns actual result immediately.
+
+    Note: As of Phase 4 (RLAPH refactoring), this returns a string
+    synchronously, not a DeferredOperation. Use like:
+
+        result = llm("What is 2+2?")
+        print(result)  # Prints: "4"
+    """
+
+def peek(var: Any, start: int = 0, end: int = 1000) -> Any:
+    """View a slice of any context variable."""
+
+def search(var: Any, pattern: str, regex: bool = False) -> list:
+    """Find patterns in context. Returns list of matches with location info."""
+
+def summarize(var: Any, max_tokens: int = 500) -> str:
+    """LLM-powered summarization via sub-call."""
+```
+
 ## Security
 
 [SPEC-01.18] All functions SHALL execute within the existing RestrictedPython sandbox.

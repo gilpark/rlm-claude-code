@@ -98,6 +98,34 @@ This document captures architectural decisions for RLM-Claude-Code. Each decisio
 
 **Decision**: Default depth=2, configurable to 3.
 
+---
+
+## ADR-010: RLAPH Loop over Deferred Operations
+
+**Status**: Accepted
+
+**Context**: The deferred operation pattern was confusing:
+- `llm()` returned `DeferredOperation` not actual result
+- LLM got confused by `<<DEFERRED:rq_1>>` output
+- Multi-turn flow was hard to debug
+- Complex async coordination required
+
+**Decision**: Switch to RLAPH-style loop with synchronous `llm()`.
+
+**Consequences**:
+- ✅ `llm()` returns actual string immediately
+- ✅ Simpler code, easier to debug
+- ✅ Single clean loop with clear history
+- ⚠️ Legacy code kept for backward compatibility (`--legacy` flag)
+- ⚠️ Thread-based approach for nested event loops
+
+**Implementation**:
+- `src/rlaph_loop.py` - Clean RLAPH loop
+- `src/recursive_handler.py` - Added `llm_sync()` method
+- `src/repl_environment.py` - Returns actual result, not DeferredOperation
+
+**Spec Reference**: Phase 6 - RLAPH Refactoring
+
 **Consequences**:
 - ✅ Enables Root → Analysis → Verification pattern
 - ✅ Supports constraint-driven verification workflows

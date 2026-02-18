@@ -61,15 +61,20 @@ Grep: "auth|login|token" in src/
 
 ### Step 2: Compose Prompt with Paths
 
-Build a prompt that includes the task and file paths:
+Build a prompt that includes the task and file paths. Include clear instructions for output format:
 
 ```
 Task: <user's original task>
 
-Relevant files (read as needed):
+Relevant files (read as needed using the `files` variable in REPL):
 - /full/path/to/src/auth/login.py
 - /full/path/to/src/auth/token.py
 - /full/path/to/src/api/middleware.py
+
+Instructions:
+1. Read the files using the REPL: files['/full/path/to/file.py']
+2. Analyze and perform the requested task
+3. End your response with: FINAL: <your complete answer>
 ```
 
 ### Step 3: Run Python Orchestrator
@@ -104,9 +109,11 @@ You:
    ```
    Task: explain how context management works
 
-   Relevant files:
+   Relevant files (read using files['/path']):
    - /path/to/src/context_manager.py
    - /path/to/src/types.py
+
+   Instructions: Read files, analyze, then end with: FINAL: <answer>
    ```
 3. Run: `uv run python scripts/run_orchestrator.py "Task: ..."`
 4. Report the answer
@@ -122,26 +129,33 @@ Shows trajectory events like:
 [REPL] result = ...
 ```
 
-### With RLAPH Mode (Recommended)
+### With Verbose Output
 
-User: `/rlm-orchestrator --rlaph analyze the auth flow`
+User: `/rlm-orchestrator --verbose analyze the auth flow`
 
-RLAPH mode uses a clean loop where `llm()` returns actual results immediately (not deferred). This is faster and easier to debug.
+Shows trajectory events like:
+```
+[RLAPH] Starting loop with query (2572 chars)
+[RLAPH] Max depth: 2
+[REASON] depth=0 tokens=5549
+[REPL] result = ...
+[RLAPH] Completed in 5 iterations
+```
 
 ### Direct Script Usage
 
 ```bash
-# RLAPH mode (recommended)
-uv run python scripts/run_orchestrator.py --rlaph "analyze auth"
+# Default RLAPH mode (recommended)
+uv run python scripts/run_orchestrator.py "analyze auth"
 
 # Verbose mode
-uv run python scripts/run_orchestrator.py --stream --verbose "analyze auth"
-
-# With streaming (experimental)
-uv run python scripts/run_orchestrator.py --stream "explain architecture"
+uv run python scripts/run_orchestrator.py --verbose "analyze auth"
 
 # Custom depth
 uv run python scripts/run_orchestrator.py --depth 3 "complex analysis"
+
+# Legacy mode (uses deferred operations)
+uv run python scripts/run_orchestrator.py --legacy "analyze auth"
 
 # Utility commands
 uv run python scripts/run_orchestrator.py --status

@@ -312,6 +312,10 @@ class RLAPHLoop:
                 }
             )
 
+        # Fallback: Use last thinking content if no answer produced
+        if state.final_answer is None and state.last_thinking_content:
+            state.final_answer = state.last_thinking_content
+
         # Build result
         execution_time = (time.time() - start_time) * 1000
 
@@ -390,11 +394,19 @@ result = llm("What is 2+2?")
 print(result)  # Prints: "4"
 ```
 
-When you have your answer, use:
-- `FINAL: <your answer>` for text answers
+When you have your answer, use ONE of these formats:
+- `FINAL: <your answer>` for text answers (put this at the end of your response)
 - `FINAL_VAR: <variable_name>` if answer is in a variable
 
-Work step by step. Use the REPL to analyze the context and gather information."""
+Example:
+```python
+# Analyze and then conclude
+result = search(files, "important")
+FINAL: The analysis found 3 important items
+```
+
+Work step by step. Use the REPL to analyze the context and gather information.
+ALWAYS end with FINAL: or FINAL_VAR: when you have completed the task."""
 
     def _get_model_for_depth(self) -> str:
         """Get appropriate model for current depth."""

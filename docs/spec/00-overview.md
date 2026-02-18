@@ -137,6 +137,26 @@ SPEC-16 (Epistemic) ──────► SPEC-01, SPEC-04, SPEC-05
 - ✅ SPEC-16.21-16.30: Orchestrator integration (always-on)
 - ✅ SPEC-16.31-16.40: Polish & optimization
 
+### Phase 4: RLAPH Refactoring (Complete - 2026-02)
+
+| Priority | Component | Status |
+|----------|-----------|--------|
+| P0 | RLAPH Loop Core | ✅ Complete |
+| P0 | Synchronous llm() | ✅ Complete |
+| P1 | Context Truncation | ✅ Complete |
+| P1 | Legacy CLI Removal | ✅ Complete |
+| P2 | Response Parser Fix | ✅ Complete |
+| P2 | Unit Tests | ✅ Complete (15 tests) |
+
+**Key Changes**:
+- `llm()` now returns actual string immediately (not `DeferredOperation`)
+- Clean `RLAPHLoop` class with synchronous `llm_sync()`
+- Context truncation in API client
+- `--legacy` flag for backward compatibility
+- `/loop` slash command for TDD-style task execution
+
+See [ADR-010](../process/architecture.md) for architecture decision.
+
 ## References
 
 - [RECOMMENDATIONS.md](../RECOMMENDATIONS.md) - Full analysis and research basis
