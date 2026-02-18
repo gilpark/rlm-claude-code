@@ -7,6 +7,8 @@ Implements: Spec §2 Architecture Overview
 from __future__ import annotations
 
 import asyncio
+import sys
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +36,17 @@ from .trajectory import (
     TrajectoryRenderer,
 )
 from .types import DeferredOperation, SessionContext
+
+
+def make_progress_callback(verbose: bool = False):
+    """Create a progress callback for LLM calls."""
+    if not verbose:
+        return None
+
+    def on_progress(elapsed: int, timeout: float):
+        print(f"[LLM] Waiting... {elapsed}s", file=sys.stderr)
+
+    return on_progress
 
 
 @dataclass
@@ -211,6 +224,7 @@ class RLMOrchestrator:
                     model=selected_model,  # Uses smart-routed model
                     max_tokens=4096,
                     component=CostComponent.ROOT_PROMPT,
+                    progress_callback=make_progress_callback(self.config.trajectory.verbosity != "minimal"),
                 )
             except Exception as e:
                 error_event = TrajectoryEvent(
@@ -418,6 +432,7 @@ class RLMOrchestrator:
                             model=retry_model,  # Use critical model for retry
                             max_tokens=4096,
                             component=CostComponent.ROOT_PROMPT,
+                            progress_callback=make_progress_callback(self.config.trajectory.verbosity != "minimal"),
                         )
                     except Exception as e:
                         state.error = str(e)
