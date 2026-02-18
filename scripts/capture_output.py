@@ -26,6 +26,7 @@ def capture_output():
     """
     try:
         from src.state_persistence import get_persistence
+        from src.types import MessageRole
 
         persistence = get_persistence()
 
@@ -35,6 +36,11 @@ def capture_output():
         # Ensure session is initialized
         if persistence.current_state is None:
             persistence.init_session(session_id)
+
+        # Capture conversation if available (Claude provides these env vars)
+        user_message = os.environ.get("CLAUDE_USER_MESSAGE", "")
+        if user_message:
+            persistence.add_message(MessageRole.USER, user_message)
 
         # Read tool output from environment
         tool_name = os.environ.get("CLAUDE_TOOL_NAME", "")
