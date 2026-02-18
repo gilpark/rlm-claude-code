@@ -7,95 +7,95 @@ description: |
 
 # RLM Orchestrator
 
-Run RLM-style analysis with context isolation via subagents.
+Run RLM-style analysis with context isolation via the Python orchestrator.
 
 ## Usage
 
 `/rlm-orchestrator [task description]`
 
-## How It Works
+## Flow
 
 ```
-Main Context (stays small):
-  - Original query
-  - File paths found via Glob/Grep
-  - Final answer from subagent
-
-Subagent Context (isolated):
-  - Task description
-  - File contents (reads itself)
-  - Analysis and reasoning
-  - Returns only answer to main
+User: /rlm-orchestrator explain the auth flow
+        ↓
+Main Claude (this command):
+  1. Interpret task
+  2. Glob/Grep to find relevant files (NO reading contents)
+  3. Compose prompt with task + file paths
+  4. Run: uv run python scripts/run_orchestrator.py "<composed prompt>"
+        ↓
+Python orchestrator:
+  5. LLM reasoning
+  6. REPL can read files as needed
+  7. Recursive sub-calls if needed
+  8. Returns answer
+        ↓
+Main Claude:
+  9. Report answer to user
 ```
 
 ## Instructions
 
-When this command is invoked, follow this RLM workflow:
+When this command is invoked, follow these steps:
 
-### Step 1: Find Relevant Files (stays in main context)
+### Step 1: Find Relevant Files
 
-Use Glob and Grep to find relevant files. Do NOT read file contents yet.
+Use Glob and Grep to find relevant files. **Do NOT read file contents.**
 
-```bash
-# Find relevant files
+```
 Glob: src/**/*.py
 Grep: "auth|login|token" in src/
 ```
 
-### Step 2: Spawn Subagent with File Paths Only
+### Step 2: Compose Prompt with Paths
 
-Pass file PATHS to subagent, not contents. The subagent will read files in its own isolated context.
+Build a prompt that includes the task and file paths:
 
 ```
-Task(
-  subagent_type="rlm-claude-core-rand:rlm-worker",
-  prompt="Task: <user's task>
+Task: <user's original task>
 
-Files to analyze:
-- src/auth/login.py
-- src/auth/token.py
-- src/api/middleware.py
-
-Read these files and answer the task. Return ONLY your final answer.",
-  description="RLM analysis"
-)
+Relevant files (read as needed):
+- /full/path/to/src/auth/login.py
+- /full/path/to/src/auth/token.py
+- /full/path/to/src/api/middleware.py
 ```
 
-### Step 3: Report Answer
+### Step 3: Run Python Orchestrator
 
-The subagent returns a small answer. Report it to the user.
+Use Bash to run the Python script with the composed prompt:
+
+```bash
+cd ${CLAUDE_PLUGIN_ROOT}
+uv run python scripts/run_orchestrator.py "<composed prompt>"
+```
+
+### Step 4: Report Answer
+
+The Python script returns the answer. Report it to the user.
 
 ## Key Rules
 
-1. **Main context stays small** - Only file paths, not contents
-2. **Subagent reads files** - Context bloat happens in subagent, not main
-3. **Pass paths, not contents** - Never paste file contents in Task prompt
-4. **Sequential is fine** - Run subagents one at a time if multiple needed
+1. **Main context stays small** - Only use Glob/Grep, never Read
+2. **Pass paths in prompt** - Let Python script read files
+3. **One Bash call** - Run Python script once with full prompt
+4. **Report only** - Don't analyze, just pass through the result
 
 ## Example
 
-User: `/rlm-orchestrator explain the authentication flow`
+User: `/rlm-orchestrator explain how context management works`
 
 You:
-1. Glob/Grep to find auth-related files
-2. Spawn Task with file paths:
+1. Grep for "context" in src/ → find context_manager.py, types.py
+2. Compose:
    ```
-   Task(prompt="Explain the authentication flow.
-   Files: src/auth/login.py, src/auth/token.py
-   Read these and explain the flow.")
+   Task: explain how context management works
+
+   Relevant files:
+   - /path/to/src/context_manager.py
+   - /path/to/src/types.py
    ```
-3. Report the answer
-
-## For Complex Tasks (Multiple Subagents)
-
-If the task is large, spawn multiple subagents sequentially:
-
-```
-# Main context only has: file paths + answers
-answer1 = Task("Analyze src/auth/")  # Wait for result
-answer2 = Task("Analyze src/api/")   # Wait for result
-final = Synthesize(answer1, answer2)
-```
+3. Run: `uv run python scripts/run_orchestrator.py "Task: ..."`
+4. Report the answer
 
 ## Related
 

@@ -2,41 +2,26 @@
 
 ## Current State (Feb 2026)
 
-Working architecture:
-- Agent-based: Orchestrator finds files → spawns Worker → Worker reads in isolated context → returns answer
-- Python script: `run_orchestrator.py` with `--files`, `--dir` args, full REPL functions
-- Hooks: SessionStart, UserPromptSubmit, PreCompact, Stop
-
-## Short Term: Streaming + Visibility ✅ DONE
-
-**Goal**: Add progress feedback during long LLM subprocess calls
-
-### Tasks
-- [x] Add progress callback to `ClaudeHeadlessClient.complete()`
-- [x] Emit progress events every 10s while waiting
-- [x] Test with quick query (works, no events for fast responses)
-
-### Files modified
-- `src/api_client.py` - Added `ProgressCallback` type and progress tracking
-
-### Usage
-```python
-def on_progress(elapsed: int, timeout: float):
-    print(f"[LLM] Waiting... {elapsed}s")
-
-response = await client.complete(
-    messages=[...],
-    progress_callback=on_progress,
-)
+**Final Architecture:**
+```
+/rlm-orchestrator <task>
+        ↓
+Main Claude (Glob/Grep only, NO Read)
+        ↓ finds file paths
+Composes prompt: "Task: ... Files: /path/1, /path/2"
+        ↓
+uv run python scripts/run_orchestrator.py "<prompt>"
+        ↓
+RLM orchestrator (REPL can read files as needed)
+        ↓
+Returns answer
 ```
 
-### Expected behavior (for long calls >10s)
-```
-[LLM] Calling sonnet...
-[LLM] Waiting... 10s
-[LLM] Waiting... 20s
-[LLM] Response received
-```
+## Completed: Short Term ✅
+
+- [x] Progress callback for long LLM calls (`src/api_client.py`)
+- [x] Simplified `run_orchestrator.py` - just takes composed prompt
+- [x] Updated `/rlm-orchestrator` command to compose prompt + call Python script
 
 ## Mid Term: Claude Agent SDK Migration
 
