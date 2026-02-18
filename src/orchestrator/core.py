@@ -237,7 +237,7 @@ class RLMOrchestrator:
             content=start_content,
             metadata={
                 "query": query,
-                "context_tokens": context.total_tokens,
+                "context_tokens": context.total_tokens if context else 0,
                 "model": selected_model,
                 "routing": routing_reason,
             },
@@ -287,7 +287,7 @@ class RLMOrchestrator:
                     messages=state.messages,
                     system=system_prompt,
                     model=selected_model,  # Uses smart-routed model
-                    max_tokens=4096,
+                    max_tokens=16384,  # Increased from 4096 for detailed analysis responses
                     component=CostComponent.ROOT_PROMPT,
                 )
             except Exception as e:
@@ -358,6 +358,10 @@ class RLMOrchestrator:
                     # Execute code in REPL
                     code = item.content
 
+                    # Reset thinking counter since we're doing REPL work
+                    if hasattr(state, 'consecutive_thinking'):
+                        state.consecutive_thinking = 0
+
                     # Emit REPL exec event
                     exec_event = TrajectoryEvent(
                         type=TrajectoryEventType.REPL_EXEC,
@@ -411,17 +415,43 @@ class RLMOrchestrator:
                     await trajectory.emit(result_event)
                     yield result_event
 
-                    # Add to conversation
+                    # Truncate REPL output before adding to root LM context (RLM paper pattern)
+                    # Root LM should only see truncated outputs to keep context small
+                    MAX_REPL_OUTPUT = 1500
+                    repl_result_str = str(repl_result) if repl_result else ""
+                    truncated_result = repl_result_str[:MAX_REPL_OUTPUT]
+                    if len(repl_result_str) > MAX_REPL_OUTPUT:
+                        truncated_result += f"\n... [truncated, {len(repl_result_str)} chars total]"
+
+                    # Add to conversation (truncated to prevent context bloat)
                     state.messages.append({"role": "assistant", "content": response.content})
                     state.messages.append(
                         {
                             "role": "user",
-                            "content": f"REPL output:\n```\n{repl_result}\n```\n\nContinue your analysis or provide FINAL: <answer>",
+                            "content": f"REPL output:\n```\n{truncated_result}\n```\n\nContinue your analysis or provide FINAL: <answer>",
                         }
                     )
 
                 elif item.action == ResponseAction.THINKING:
-                    # Just thinking, add to messages and continue
+                    # Track consecutive thinking turns for fallback detection
+                    if not hasattr(state, 'consecutive_thinking'):
+                        state.consecutive_thinking = 0
+                        state.last_thinking_content = ""
+
+                    state.consecutive_thinking += 1
+                    state.last_thinking_content = item.content
+
+                    # Fallback: After 2+ consecutive thinking turns with substantial content,
+                    # treat the last content as the answer (LLM didn't use FINAL: prefix)
+                    MIN_CONTENT_LEN = 100  # Substantial content threshold
+                    if state.consecutive_thinking >= 2 and len(item.content) >= MIN_CONTENT_LEN:
+                        # Check if content looks complete (doesn't end with continuation markers)
+                        content_stripped = item.content.strip()
+                        if not content_stripped.endswith(('...', ':', '-', '•')):
+                            state.final_answer = item.content
+                            break
+
+                    # Otherwise, continue the loop
                     state.messages.append({"role": "assistant", "content": response.content})
                     state.messages.append(
                         {
@@ -507,7 +537,7 @@ class RLMOrchestrator:
                             messages=state.messages,
                             system=system_prompt,
                             model=retry_model,  # Use critical model for retry
-                            max_tokens=4096,
+                            max_tokens=16384,  # Increased from 4096 for detailed analysis
                             component=CostComponent.ROOT_PROMPT,
                         )
                     except Exception as e:

@@ -6,6 +6,15 @@ Called by: hooks/hooks.json PreToolUse
 
 This ensures the RLM environment has access to the latest
 context before any tool (bash, edit, read) is executed.
+
+Hook input (via stdin JSON):
+{
+    "session_id": "...",
+    "transcript_path": "...",
+    "tool_name": "Bash|Read|Edit|Write|...",
+    "tool_input": {...},
+    "tool_use_id": "..."
+}
 """
 
 import json
@@ -21,41 +30,47 @@ def sync_context():
     """
     Sync context from Claude Code to RLM state.
 
-    Reads context from environment or stdin and updates
-    the RLM state persistence layer.
+    Reads hook data from stdin JSON (Claude Code hooks protocol)
+    and updates the RLM state persistence layer.
     """
     try:
         from src.state_persistence import get_persistence
 
         persistence = get_persistence()
 
-        # Get session ID from environment
-        session_id = os.environ.get("CLAUDE_SESSION_ID", "default")
+        # Read hook input from stdin (Claude Code hooks pass JSON via stdin)
+        hook_data = {}
+        try:
+            stdin_data = sys.stdin.read().strip()
+            if stdin_data:
+                hook_data = json.loads(stdin_data)
+        except json.JSONDecodeError:
+            pass  # Empty or invalid stdin
+
+        # Get session ID from hook data or environment
+        session_id = hook_data.get("session_id") or os.environ.get("CLAUDE_SESSION_ID", "default")
 
         # Initialize or restore session
         if persistence.current_state is None:
             persistence.init_session(session_id)
 
-        # Read tool context from environment if available
-        tool_name = os.environ.get("CLAUDE_TOOL_NAME", "")
-        tool_input = os.environ.get("CLAUDE_TOOL_INPUT", "")
+        # Extract tool info from hook data (stdin JSON)
+        tool_name = hook_data.get("tool_name", "")
+        tool_input = hook_data.get("tool_input", {})
 
         if tool_name:
             # Log tool invocation to working memory
+            input_preview = json.dumps(tool_input)[:200] if isinstance(tool_input, dict) else str(tool_input)[:200]
             persistence.update_working_memory(
                 "last_tool",
-                {"name": tool_name, "input_preview": tool_input[:200]},
+                {"name": tool_name, "input_preview": input_preview},
             )
 
         # If read tool, prepare to cache file content
-        if tool_name == "Read":
-            try:
-                input_data = json.loads(tool_input) if tool_input else {}
-                file_path = input_data.get("file_path", "")
-                if file_path:
-                    persistence.update_working_memory("pending_file_read", file_path)
-            except json.JSONDecodeError:
-                pass
+        if tool_name == "Read" and isinstance(tool_input, dict):
+            file_path = tool_input.get("file_path", "")
+            if file_path:
+                persistence.update_working_memory("pending_file_read", file_path)
 
         # Output success
         result = {

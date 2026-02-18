@@ -23,6 +23,7 @@ import openai
 from dotenv import load_dotenv
 
 from .cost_tracker import CostComponent, CostTracker, get_cost_tracker
+from .tokenization import count_tokens
 
 # Auto-load .env from project root
 _project_root = Path(__file__).parent.parent
@@ -63,6 +64,122 @@ class StreamChunk:
 
 # Progress callback type for long-running LLM calls
 ProgressCallback = Callable[[int, float], None]  # (elapsed_seconds, timeout_seconds)
+
+
+# Model context limits (input tokens)
+MODEL_CONTEXT_LIMITS: dict[str, int] = {
+    # Anthropic models
+    "claude-opus-4-5-20251101": 200_000,
+    "claude-sonnet-4-20250514": 200_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    # GLM models (via custom endpoint - check actual limits)
+    "glm-4.7": 128_000,
+    "glm-5": 200_000,
+    # OpenAI models
+    "gpt-5.2": 1_000_000,
+    "gpt-5.2-pro": 1_000_000,
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "o1": 200_000,
+    "o1-mini": 128_000,
+    "o3-mini": 200_000,
+}
+
+# Default context limit if model not in registry
+DEFAULT_CONTEXT_LIMIT = 128_000
+
+
+def get_context_limit(model: str) -> int:
+    """Get the context limit for a model."""
+    return MODEL_CONTEXT_LIMITS.get(model, DEFAULT_CONTEXT_LIMIT)
+
+
+def truncate_messages_to_fit(
+    messages: list[dict[str, str]],
+    system: str | None,
+    max_output_tokens: int,
+    model: str,
+) -> tuple[list[dict[str, str]], bool]:
+    """
+    Truncate messages to fit within model's context limit.
+
+    Strategy:
+    1. Count tokens in system prompt and messages
+    2. If over limit, truncate from the middle (keep first and last messages)
+    3. Add truncation notice
+
+    Args:
+        messages: List of message dicts
+        system: System prompt (optional)
+        max_output_tokens: Reserved tokens for output
+        model: Model name
+
+    Returns:
+        Tuple of (truncated_messages, was_truncated)
+    """
+    context_limit = get_context_limit(model)
+    reserved_for_output = max_output_tokens + 1000  # Safety margin
+
+    # Calculate current token count
+    system_tokens = count_tokens(system) if system else 0
+    message_tokens = sum(count_tokens(m.get("content", "")) for m in messages)
+    total_tokens = system_tokens + message_tokens
+
+    available_for_input = context_limit - reserved_for_output
+
+    if total_tokens <= available_for_input:
+        return messages, False
+
+    # Need to truncate - keep first message (user query) and last few messages
+    if len(messages) <= 2:
+        # Can't truncate further, just truncate the content
+        truncated = []
+        for msg in messages:
+            content = msg.get("content", "")
+            max_content_tokens = available_for_input // len(messages) - count_tokens(msg.get("role", ""))
+            if count_tokens(content) > max_content_tokens:
+                # Truncate content
+                chars_to_keep = max_content_tokens * 4  # ~4 chars per token
+                truncated_content = content[:chars_to_keep] + "\n... [content truncated]"
+                truncated.append({**msg, "content": truncated_content})
+            else:
+                truncated.append(msg)
+        return truncated, True
+
+    # Keep first message and last N messages, truncate middle
+    first_msg = messages[0]
+    first_tokens = count_tokens(first_msg.get("content", ""))
+
+    # Reserve tokens for truncation notice
+    truncation_notice = "\n... [earlier messages truncated to fit context limit]...\n\n"
+    truncation_tokens = count_tokens(truncation_notice)
+
+    remaining_tokens = available_for_input - system_tokens - first_tokens - truncation_tokens
+
+    # Add messages from the end until we run out of space
+    kept_messages = []
+    current_tokens = 0
+
+    for msg in reversed(messages[1:]):
+        msg_tokens = count_tokens(msg.get("content", ""))
+        if current_tokens + msg_tokens <= remaining_tokens:
+            kept_messages.insert(0, msg)
+            current_tokens += msg_tokens
+        else:
+            break
+
+    # Build final message list
+    result = [first_msg]
+
+    if kept_messages:
+        # Add truncation notice as a system-ish message
+        result.append({
+            "role": "user",
+            "content": truncation_notice,
+        })
+        result.extend(kept_messages)
+
+    return result, True
 
 
 # Model registry with provider info
@@ -479,15 +596,46 @@ class MultiProviderClient:
         elif messages is None:
             messages = []
 
-        return await client.complete(
+        # Truncate messages to fit context limit
+        messages, was_truncated = truncate_messages_to_fit(
             messages=messages,
             system=system,
+            max_output_tokens=max_tokens,
             model=full_model,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            component=component,
-            progress_callback=progress_callback,
         )
+
+        try:
+            return await client.complete(
+                messages=messages,
+                system=system,
+                model=full_model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                component=component,
+                progress_callback=progress_callback,
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Check if error is context length related
+            if "context length" in error_msg.lower() or "input tokens" in error_msg.lower() or "1210" in error_msg:
+                # Retry with more aggressive truncation
+                # Keep only the last few messages
+                if len(messages) > 2:
+                    truncated_messages = [messages[0]] + messages[-2:]
+                    truncated_messages.insert(1, {
+                        "role": "user",
+                        "content": "[Context truncated due to length limit]\n",
+                    })
+                    return await client.complete(
+                        messages=truncated_messages,
+                        system=system,
+                        model=full_model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        component=component,
+                        progress_callback=progress_callback,
+                    )
+            raise
 
     async def complete_streaming(
         self,
@@ -501,6 +649,14 @@ class MultiProviderClient:
         """Get streaming completion, routing to appropriate provider."""
         model = model or self.default_model
         client, full_model = self._get_client(model)
+
+        # Truncate messages to fit context limit
+        messages, _ = truncate_messages_to_fit(
+            messages=messages,
+            system=system,
+            max_output_tokens=max_tokens,
+            model=full_model,
+        )
 
         async for chunk in client.complete_streaming(
             messages=messages,
@@ -598,6 +754,7 @@ __all__ = [
     "AnthropicClient",
     "BaseLLMClient",
     "ClaudeClient",
+    "MODEL_CONTEXT_LIMITS",
     "MODEL_REGISTRY",
     "MultiProviderClient",
     "OpenAIClient",
@@ -605,6 +762,8 @@ __all__ = [
     "Provider",
     "StreamChunk",
     "get_client",
+    "get_context_limit",
     "init_client",
     "resolve_model",
+    "truncate_messages_to_fit",
 ]
