@@ -68,8 +68,7 @@ def capture_output():
                 )
                 persistence.update_working_memory("recent_errors", error_count + 1)
 
-        # Save state periodically
-        if persistence.current_state.tool_outputs_count % 10 == 0:
+            # Always save after capturing tool output
             persistence.save_state()
 
         # Output success
