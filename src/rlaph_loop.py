@@ -16,6 +16,7 @@ import asyncio
 import time
 import warnings
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 # Suppress third-party warnings at import time
@@ -133,6 +134,7 @@ class RLAPHLoop:
         self,
         query: str,
         context: SessionContext,
+        working_dir: Path | str | None = None,
     ) -> RLPALoopResult:
         """
         Main loop - clean, predictable, debuggable.
@@ -149,6 +151,7 @@ class RLAPHLoop:
         Args:
             query: User query
             context: Session context (files, conversation, etc.)
+            working_dir: Working directory for file operations (default: cwd)
 
         Returns:
             RLPALoopResult with answer and metadata
@@ -171,6 +174,12 @@ class RLAPHLoop:
             trajectory=self.trajectory,
         )
         self.repl = RLMEnvironment(context, recursive_handler=self.recursive_handler)
+
+        # Enable file access for context externalization
+        # This is critical for RLM to handle large contexts:
+        # Files are NOT passed in the prompt, REPL reads them on-demand
+        work_dir = Path(working_dir) if working_dir else Path.cwd()
+        self.repl.enable_file_access(working_dir=work_dir)
 
         # Build initial messages
         system_prompt = self._build_system_prompt()
@@ -370,43 +379,51 @@ class RLAPHLoop:
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with REPL instructions."""
-        return """You are an RLM (Recursive Language Model) agent.
+        return """You are an RLM (Recursive Language Model) agent with access to a REAL Python REPL.
 
-You have access to a Python REPL environment with these variables:
-- `files`: Dict of file paths to content
-- `conversation`: List of conversation messages
-- `tool_outputs`: List of tool execution results
-- `working_memory`: Dict for storing intermediate results
+CRITICAL: You have a REAL Python environment, not a simulated one. When you write code in ```python blocks, it ACTUALLY EXECUTES and you will see the REAL output.
 
-And these functions:
+Your workflow:
+1. Write Python code in ```python blocks to interact with files and data
+2. The system executes your code and returns the ACTUAL output
+3. Read the output, then write more code or provide your final answer
+4. When done, write FINAL: <answer> OUTSIDE the code block
+
+File Access Functions (Context Externalization):
+Files are NOT in the prompt (would exceed token limits). Read them on-demand:
+- `read_file(path, offset=0, limit=2000)`: Read file content from disk
+- `glob_files(pattern)`: Find files matching pattern (returns list of paths)
+- `grep_files(pattern, path)`: Search for pattern in files
+- `list_dir(path)`: List directory contents
+
+Example interaction:
+```
+User: How many Python files are in src/?
+
+Your response:
+```python
+files = glob_files("src/**/*.py")
+print(f"Found {len(files)} files")
+```
+
+System returns: Found 81 files
+
+Now you know the answer:
+FINAL: There are 81 Python files in src/
+```
+
+Other helper functions:
 - `peek(var, start, end)`: View a slice of a variable
-- `search(var, pattern, regex=False)`: Search for patterns in a variable
-- `find_relevant(content, query, top_k=5)`: Find relevant sections
-- `summarize(var, max_tokens=500)`: Summarize content
-- `llm(query, context=None)`: **IMPORTANT: Returns actual result immediately**
+- `search(var, pattern)`: Search for patterns in a variable
+- `summarize(var, max_tokens)`: Summarize content using LLM
+- `llm(query, context)`: Make a recursive LLM call (returns actual result)
 - `llm_batch(queries)`: Execute multiple LLM queries in parallel
-- `map_reduce(content, map_prompt, reduce_prompt)`: Process content in chunks
+- `map_reduce(content, map_p, reduce_p)`: Process content in chunks
 
-IMPORTANT: `llm()` now returns the actual result as a string immediately.
-You can use it like:
-```python
-result = llm("What is 2+2?")
-print(result)  # Prints: "4"
-```
+Working memory:
+- `working_memory`: Dict for storing intermediate results across code blocks
 
-When you have your answer, use ONE of these formats:
-- `FINAL: <your answer>` for text answers (put this at the end of your response)
-- `FINAL_VAR: <variable_name>` if answer is in a variable
-
-Example:
-```python
-# Analyze and then conclude
-result = search(files, "important")
-FINAL: The analysis found 3 important items
-```
-
-Work step by step. Use the REPL to analyze the context and gather information.
-ALWAYS end with FINAL: or FINAL_VAR: when you have completed the task."""
+IMPORTANT: Write code, see output, then provide FINAL: answer. Do NOT guess."""
 
     def _get_model_for_depth(self) -> str:
         """Get appropriate model for current depth."""

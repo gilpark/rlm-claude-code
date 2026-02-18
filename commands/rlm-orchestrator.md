@@ -83,7 +83,7 @@ Use Bash to run the Python script with the composed prompt:
 
 ```bash
 cd ${CLAUDE_PLUGIN_ROOT}
-uv run python scripts/run_orchestrator.py --stream --verbose "<composed prompt>"
+uv run python scripts/run_orchestrator.py --verbose "<composed prompt>"
 ```
 
 ### Step 4: Report Answer

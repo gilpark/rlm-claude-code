@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from RestrictedPython import compile_restricted, safe_builtins
@@ -55,8 +56,10 @@ MICRO_MODE_BLOCKED = frozenset(
 )
 
 if TYPE_CHECKING:
+    from .cell_manager import CellManager
     from .memory_store import MemoryStore
     from .recursive_handler import RecursiveREPL
+    from .tool_bridge import ToolBridge
 
 # Subprocess allowlist for sandbox
 ALLOWED_SUBPROCESSES = frozenset({"uv", "ty", "ruff"})
@@ -194,6 +197,14 @@ class RLMEnvironment:
         # Memory store (initialized via enable_memory())
         self._memory_store: MemoryStore | None = None
         self._session_id: str | None = None
+
+        # Cell manager (initialized via enable_cells())
+        self._cell_manager: CellManager | None = None
+        self._current_cell_id: str | None = None
+
+        # Tool bridge for file access (initialized via enable_file_access())
+        self._tool_bridge: ToolBridge | None = None
+        self._working_dir: Path | None = None
 
     def _guarded_getitem(self, obj: Any, key: Any) -> Any:
         """
@@ -1648,6 +1659,69 @@ class RLMEnvironment:
         self.globals["memory_get_context"] = self._memory_get_context
         self.globals["memory_relate"] = self._memory_relate
 
+    def enable_cells(self, cell_manager: CellManager) -> None:
+        """
+        Enable cell functions in the REPL environment.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_manager: CellManager instance to use for cell operations
+        """
+        self._cell_manager = cell_manager
+
+        # Add cell functions to globals (only in standard/full modes)
+        if self.access_level != "micro":
+            self.globals["cell_create"] = self._cell_create
+            self.globals["cell_complete"] = self._cell_complete
+            self.globals["cell_get"] = self._cell_get
+            self.globals["cell_list"] = self._cell_list
+            self.globals["cell_dependencies"] = self._cell_dependencies
+
+    def enable_file_access(
+        self,
+        working_dir: str | Path | None = None,
+        tool_bridge: ToolBridge | None = None,
+    ) -> None:
+        """
+        Enable file reading functions in the REPL environment.
+
+        Implements: Spec §3 Context Externalization
+
+        This is the key method for RLM to handle large contexts:
+        - Files are NOT passed in the prompt (would exceed token limits)
+        - Instead, REPL can read files on-demand using read_file()
+
+        Args:
+            working_dir: Working directory for file operations
+            tool_bridge: Optional pre-configured ToolBridge
+        """
+        self._working_dir = Path(working_dir) if working_dir else Path.cwd()
+
+        if tool_bridge:
+            self._tool_bridge = tool_bridge
+        else:
+            from .orchestration_schema import ToolAccessLevel
+            from .tool_bridge import ToolPermissions, ToolBridge
+
+            # Create tool bridge with read-only permissions
+            permissions = ToolPermissions(
+                access_level=ToolAccessLevel.READ_ONLY,
+                allow_file_read=True,
+                allow_search=True,
+            )
+            self._tool_bridge = ToolBridge(
+                permissions=permissions,
+                working_dir=self._working_dir,
+            )
+
+        # Add file access functions to globals (only in standard/full modes)
+        if self.access_level != "micro":
+            self.globals["read_file"] = self._read_file
+            self.globals["glob_files"] = self._glob_files
+            self.globals["grep_files"] = self._grep_files
+            self.globals["list_dir"] = self._list_dir
+
     def _memory_query(
         self, query: str, limit: int = 10, tier: str | None = None
     ) -> list[Any]:
@@ -1804,6 +1878,365 @@ class RLMEnvironment:
                 {"node_id": node_id2, "role": "object", "position": 1},
             ],
         )
+
+    # =========================================================================
+    # Cell Functions (Phase 2 - Session State Consolidation)
+    # =========================================================================
+
+    def _cell_create(
+        self,
+        cell_type: str,
+        operation: str,
+        args: dict[str, Any] | None = None,
+        dependencies: list[str] | None = None,
+    ) -> str:
+        """
+        Create a new cell for tracking computation.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_type: Type of cell ("repl", "tool", "llm_call", "map_reduce", "verification")
+            operation: Operation being performed
+            args: Arguments for the operation
+            dependencies: List of cell IDs this depends on
+
+        Returns:
+            Cell ID of created cell
+
+        Example:
+            cell_id = cell_create("repl", "analyze_data", {"data": my_data})
+        """
+        if self._cell_manager is None:
+            raise RuntimeError("Cells not enabled. Call enable_cells() first.")
+
+        from .session_schema import CellType
+
+        # Map string to CellType enum
+        type_map = {
+            "repl": CellType.REPL,
+            "tool": CellType.TOOL,
+            "llm_call": CellType.LLM_CALL,
+            "map_reduce": CellType.MAP_REDUCE,
+            "verification": CellType.VERIFICATION,
+        }
+
+        if cell_type not in type_map:
+            raise ValueError(f"Invalid cell type: {cell_type}. Must be one of: {list(type_map.keys())}")
+
+        cell = self._cell_manager.create_cell(
+            cell_type=type_map[cell_type],
+            input_source="repl",
+            operation=operation,
+            args=args,
+            dependencies=dependencies,
+            depth=self.recursive_handler.depth if self.recursive_handler else 0,
+        )
+
+        # Track as current cell
+        self._current_cell_id = cell.cell_id
+
+        return cell.cell_id
+
+    def _cell_complete(
+        self,
+        cell_id: str,
+        result: Any = None,
+        error: str | None = None,
+    ) -> None:
+        """
+        Mark a cell as completed with result or error.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_id: Cell ID to complete
+            result: Result value (if successful)
+            error: Error message (if failed)
+
+        Example:
+            cell_complete(cell_id, result={"answer": 42})
+        """
+        if self._cell_manager is None:
+            raise RuntimeError("Cells not enabled. Call enable_cells() first.")
+
+        self._cell_manager.complete_cell(
+            cell_id=cell_id,
+            result=result,
+            error=error,
+        )
+
+        # Clear current cell if this was it
+        if self._current_cell_id == cell_id:
+            self._current_cell_id = None
+
+    def _cell_get(self, cell_id: str) -> dict[str, Any] | None:
+        """
+        Get cell details by ID.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_id: Cell ID to retrieve
+
+        Returns:
+            Dict with cell details, or None if not found
+
+        Example:
+            cell = cell_get("cell_a1b2c3d4")
+            print(cell["output"]["result"])
+        """
+        if self._cell_manager is None:
+            raise RuntimeError("Cells not enabled. Call enable_cells() first.")
+
+        try:
+            cell = self._cell_manager.get_cell(cell_id)
+            return {
+                "cell_id": cell.cell_id,
+                "type": cell.type,
+                "input": {
+                    "source": cell.input.source,
+                    "operation": cell.input.operation,
+                    "args": cell.input.args,
+                },
+                "output": {
+                    "result": cell.output.result,
+                    "error": cell.output.error,
+                    "execution_time_ms": cell.output.execution_time_ms,
+                },
+                "dependencies": cell.dependencies,
+                "dependents": cell.dependents,
+                "created_at": cell.created_at,
+            }
+        except Exception:
+            return None
+
+    def _cell_list(self, cell_type: str | None = None) -> list[str]:
+        """
+        List all cells, optionally filtered by type.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_type: Optional type filter ("repl", "tool", "llm_call", etc.)
+
+        Returns:
+            List of cell IDs
+
+        Example:
+            repl_cells = cell_list("repl")
+            all_cells = cell_list()
+        """
+        if self._cell_manager is None:
+            raise RuntimeError("Cells not enabled. Call enable_cells() first.")
+
+        if cell_type:
+            from .session_schema import CellType
+
+            type_map = {
+                "repl": CellType.REPL,
+                "tool": CellType.TOOL,
+                "llm_call": CellType.LLM_CALL,
+                "map_reduce": CellType.MAP_REDUCE,
+                "verification": CellType.VERIFICATION,
+            }
+
+            if cell_type not in type_map:
+                raise ValueError(f"Invalid cell type: {cell_type}")
+
+            return self._cell_manager.get_cells_by_type(type_map[cell_type])
+
+        # Return in execution order
+        return self._cell_manager.get_execution_order()
+
+    def _cell_dependencies(self, cell_id: str) -> dict[str, list[str]]:
+        """
+        Get dependency chain for a cell.
+
+        Implements: Session State Consolidation Plan Phase 2
+
+        Args:
+            cell_id: Cell ID to get dependencies for
+
+        Returns:
+            Dict with "dependencies" (must run before) and "dependents" (must run after)
+
+        Example:
+            deps = cell_dependencies("cell_a1b2c3d4")
+            print(f"Must run after: {deps['dependencies']}")
+            print(f"Must run before: {deps['dependents']}")
+        """
+        if self._cell_manager is None:
+            raise RuntimeError("Cells not enabled. Call enable_cells() first.")
+
+        return {
+            "dependencies": self._cell_manager.get_dependency_chain(cell_id),
+            "dependents": self._cell_manager.get_dependents(cell_id),
+        }
+
+    # =========================================================================
+    # File Access Functions (Context Externalization)
+    # =========================================================================
+
+    def _read_file(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int = 2000,
+    ) -> str:
+        """
+        Read a file from disk (externalized context access).
+
+        Implements: Spec §3 Context Externalization
+
+        This is the key function for RLM to handle large contexts:
+        - Files are NOT in the prompt (would exceed token limits)
+        - REPL reads them on-demand using this function
+        - Results can be stored in working_memory for reuse
+
+        Args:
+            path: File path (absolute or relative to working_dir)
+            offset: Line offset to start reading (default 0)
+            limit: Maximum number of lines to read (default 2000)
+
+        Returns:
+            File content as string
+
+        Raises:
+            RuntimeError: If file access not enabled
+            FileNotFoundError: If file doesn't exist
+
+        Example:
+            # Read entire file
+            content = read_file("src/main.py")
+
+            # Read first 100 lines
+            header = read_file("README.md", limit=100)
+
+            # Read lines 500-700
+            middle = read_file("large_file.py", offset=500, limit=200)
+
+            # Store in working memory for later use
+            working_memory["main_content"] = read_file("src/main.py")
+        """
+        if self._tool_bridge is None:
+            raise RuntimeError("File access not enabled. Call enable_file_access() first.")
+
+        result = self._tool_bridge.tool_call("read", path, offset=offset, limit=limit)
+
+        if not result.success:
+            raise FileNotFoundError(f"Failed to read {path}: {result.error}")
+
+        # Cache in files dict for later access
+        if path not in self.globals["files"]:
+            self.globals["files"][path] = result.output
+
+        return result.output
+
+    def _glob_files(self, pattern: str, path: str | None = None) -> list[str]:
+        """
+        Find files matching a glob pattern.
+
+        Implements: Spec §3 Context Externalization
+
+        Args:
+            pattern: Glob pattern (e.g., "**/*.py", "src/**/*.ts")
+            path: Base directory (default: working_dir)
+
+        Returns:
+            List of matching file paths
+
+        Example:
+            py_files = glob_files("**/*.py")
+            test_files = glob_files("tests/**/test_*.py")
+        """
+        if self._tool_bridge is None:
+            raise RuntimeError("File access not enabled. Call enable_file_access() first.")
+
+        result = self._tool_bridge.tool_call("glob", pattern, path)
+
+        if not result.success:
+            return []
+
+        # Return as list
+        return [line for line in result.output.strip().split("\n") if line]
+
+    def _grep_files(
+        self,
+        pattern: str,
+        path: str | None = None,
+        ignore_case: bool = True,
+    ) -> str:
+        """
+        Search for pattern in files using grep.
+
+        Implements: Spec §3 Context Externalization
+
+        Args:
+            pattern: Search pattern (regex supported)
+            path: Base directory (default: working_dir)
+            ignore_case: Case-insensitive search (default True)
+
+        Returns:
+            Grep output with file:line matches
+
+        Example:
+            matches = grep_files("def.*handle", "src/")
+            print(matches)  # Shows file:line:content
+        """
+        if self._tool_bridge is None:
+            raise RuntimeError("File access not enabled. Call enable_file_access() first.")
+
+        result = self._tool_bridge.tool_call("grep", pattern, path, ignore_case=ignore_case)
+
+        if not result.success:
+            return ""
+
+        return result.output
+
+    def _list_dir(self, path: str | None = None) -> list[dict[str, Any]]:
+        """
+        List directory contents.
+
+        Implements: Spec §3 Context Externalization
+
+        Args:
+            path: Directory path (default: working_dir)
+
+        Returns:
+            List of dicts with 'name', 'is_dir', 'size' keys
+
+        Example:
+            entries = list_dir("src/")
+            for entry in entries:
+                if entry["is_dir"]:
+                    print(f"d {entry['name']}/")
+                else:
+                    print(f"- {entry['name']}")
+        """
+        if self._tool_bridge is None:
+            raise RuntimeError("File access not enabled. Call enable_file_access() first.")
+
+        result = self._tool_bridge.tool_call("ls", path)
+
+        if not result.success:
+            return []
+
+        # Parse output into structured data
+        entries = []
+        for line in result.output.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                is_dir = parts[0] == "d"
+                name = parts[1]
+                entries.append({
+                    "name": name,
+                    "is_dir": is_dir,
+                })
+
+        return entries
 
     def get_context_stats(self) -> dict[str, Any]:
         """

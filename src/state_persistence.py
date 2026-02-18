@@ -2,12 +2,14 @@
 State persistence for RLM-Claude-Code.
 
 Implements: Spec §5.2 Hook Integration (state management)
+Implements: Session State Consolidation Plan Phase 1 (SessionManager delegation)
 
 Handles:
 - Save RLM state on session end
 - Restore RLM state on session resume
 - Clear state on /clear
 - Tool state synchronization
+- SessionManager delegation for session-centric operations
 """
 
 from __future__ import annotations
@@ -16,12 +18,16 @@ import json
 import os
 import tempfile
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import RLMConfig, default_config
 from .types import Message, MessageRole, SessionContext, ToolOutput
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
 
 
 @dataclass
@@ -67,16 +73,23 @@ class StatePersistence:
     Manages RLM state persistence across sessions.
 
     Implements: Spec §5.2 Hook Integration
+    Implements: Session State Consolidation Plan Phase 1
 
-    State is stored in ~/.claude/rlm-state/
+    State is stored in:
+    - Legacy: ~/.claude/rlm-state/ (flat files)
+    - New: ~/.claude/rlm-sessions/{session_id}/ (session-centric)
+
+    The class delegates to SessionManager for session-centric operations
+    while maintaining backward compatibility with flat-file access.
     """
 
-    def __init__(self, config: RLMConfig | None = None):
+    def __init__(self, config: RLMConfig | None = None, use_session_manager: bool = True):
         """
         Initialize state persistence.
 
         Args:
             config: RLM configuration
+            use_session_manager: Whether to use SessionManager for session-centric ops
         """
         self.config = config or default_config
         self.state_dir = Path.home() / ".claude" / "rlm-state"
@@ -85,6 +98,10 @@ class StatePersistence:
         # Current session state (in-memory)
         self._current_state: RLMSessionState | None = None
         self._current_context: SessionContext | None = None
+
+        # SessionManager for session-centric operations
+        self._use_session_manager = use_session_manager
+        self._session_manager: SessionManager | None = None
 
     @property
     def current_state(self) -> RLMSessionState | None:
@@ -401,6 +418,143 @@ class StatePersistence:
                 cleaned += 1
 
         return cleaned
+
+    # =========================================================================
+    # SessionManager Delegation (Phase 1 - Session State Consolidation)
+    # =========================================================================
+
+    @property
+    def session_manager(self) -> SessionManager:
+        """
+        Get or create SessionManager instance.
+
+        Lazy initialization to avoid circular imports.
+        """
+        if self._session_manager is None:
+            from .session_manager import SessionManager
+
+            self._session_manager = SessionManager()
+        return self._session_manager
+
+    def create_session_dir(
+        self,
+        session_id: str,
+        cwd: str,
+        transcript_path: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        """
+        Create a new session-centric directory structure.
+
+        Delegates to SessionManager.create_session().
+
+        Args:
+            session_id: Unique session identifier
+            cwd: Current working directory
+            transcript_path: Path to Claude's native transcript
+            metadata: Additional metadata
+
+        Returns:
+            SessionState from SessionManager
+        """
+        return self.session_manager.create_session(
+            session_id=session_id,
+            cwd=cwd,
+            transcript_path=transcript_path,
+            metadata=metadata,
+        )
+
+    def load_session_state(self, session_id: str) -> Any:
+        """
+        Load session state from session-centric directory.
+
+        Delegates to SessionManager.load_session().
+
+        Args:
+            session_id: Session to load
+
+        Returns:
+            SessionState from SessionManager
+        """
+        return self.session_manager.load_session(session_id)
+
+    def save_session_state(self, state: Any | None = None) -> Path:
+        """
+        Save session state to session-centric directory.
+
+        Delegates to SessionManager.save_session().
+
+        Args:
+            state: State to save (uses current if not provided)
+
+        Returns:
+            Path to saved session.json
+        """
+        return self.session_manager.save_session(state)
+
+    def get_session_dir(self, session_id: str) -> Path:
+        """
+        Get session directory path.
+
+        Delegates to SessionManager.get_session_dir().
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Path to session directory
+        """
+        return self.session_manager.get_session_dir(session_id)
+
+    def migrate_to_session_dir(self, session_id: str) -> Path | None:
+        """
+        Migrate flat file state to session-centric directory.
+
+        Args:
+            session_id: Session to migrate
+
+        Returns:
+            Path to new session directory, or None if no migration needed
+        """
+        # Check if session already exists in new format
+        if self.session_manager.session_exists(session_id):
+            return None
+
+        # Check if legacy state exists
+        legacy_file = self.get_state_file(session_id)
+        if not legacy_file.exists():
+            return None
+
+        # Load legacy state
+        try:
+            state = self.restore_state(session_id)
+        except FileNotFoundError:
+            return None
+
+        # Create new session directory
+        new_state = self.session_manager.create_session(
+            session_id=session_id,
+            cwd=state.file_cache.get("cwd", str(Path.cwd())),
+            metadata={
+                "session_type": "migrated",
+                "description": "Migrated from legacy flat-file format",
+            },
+        )
+
+        # Copy relevant data
+        new_state.activation.rlm_active = state.rlm_active
+        new_state.activation.current_depth = state.current_depth
+        new_state.budget.total_tokens_used = state.total_tokens_used
+        new_state.budget.total_recursive_calls = state.total_recursive_calls
+
+        # Copy working memory
+        for key, value in state.working_memory.items():
+            new_state.context.working_memory[key] = value
+
+        # Save migrated state
+        self.session_manager.save_session(new_state)
+
+        return self.session_manager.get_session_dir(session_id)
 
 
 # Global instance for hook scripts

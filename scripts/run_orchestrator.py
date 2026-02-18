@@ -218,6 +218,7 @@ async def run_rlaph(
     query: str,
     depth: int = 2,
     verbose: bool = False,
+    working_dir: Path | None = None,
 ) -> str:
     """
     Run the RLAPH loop (clean synchronous llm() mode).
@@ -231,6 +232,7 @@ async def run_rlaph(
         query: User query (includes task + file paths)
         depth: Maximum recursion depth (default 2)
         verbose: Print trajectory events
+        working_dir: Working directory for file operations
 
     Returns:
         Final answer from RLAPH loop
@@ -245,6 +247,8 @@ async def run_rlaph(
     if verbose:
         print(f"[RLAPH] Starting loop with query ({len(query)} chars)")
         print(f"[RLAPH] Max depth: {depth}")
+        if working_dir:
+            print(f"[RLAPH] Working dir: {working_dir}")
 
     # Create renderer for verbose output
     renderer = TrajectoryRenderer(verbosity="verbose") if verbose else None
@@ -257,7 +261,7 @@ async def run_rlaph(
     )
 
     # Run loop
-    result = await loop.run(query, context)
+    result = await loop.run(query, context, working_dir=working_dir)
 
     if verbose:
         print(f"[RLAPH] Completed in {result.iterations} iterations")
@@ -322,10 +326,18 @@ Examples:
     if not query:
         parser.error("Query required. Provide as argument or use --query")
 
+    # Determine working directory (project root)
+    plugin_root = Path(__file__).parent.parent
+
     # Run RLAPH loop (clean synchronous llm() mode)
     try:
         result = asyncio.run(
-            run_rlaph(query, depth=args.depth, verbose=args.verbose)
+            run_rlaph(
+                query,
+                depth=args.depth,
+                verbose=args.verbose,
+                working_dir=plugin_root,
+            )
         )
         print(result)
     except KeyboardInterrupt:
