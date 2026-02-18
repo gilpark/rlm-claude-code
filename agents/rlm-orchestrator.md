@@ -7,7 +7,7 @@ tools: Read, Bash, Skill, Task
 model: sonnet
 permissionMode: acceptEdits
 hooks:
-  # Initialize RLM context when agent starts
+  # Initialize RLM context when this agent starts (agent-specific)
   SubagentStart:
     - hooks:
         - type: command
@@ -15,29 +15,17 @@ hooks:
           timeout: 5000
           description: "Initialize RLM context from session state"
           once: true
-
-  # Capture tool outputs for RLM context
-  PostToolUse:
-    - matcher: "Read|Bash|Edit|Glob|Grep"
-      hooks:
-        - type: command
-          command: 'cd "${CLAUDE_PLUGIN_ROOT}" && .venv/bin/python scripts/capture_output.py'
-          timeout: 2000
-          description: "Capture tool output for RLM context"
-
-  # Save trajectory when agent completes
-  Stop:
-    - hooks:
-        - type: command
-          command: 'cd "${CLAUDE_PLUGIN_ROOT}" && .venv/bin/python scripts/save_trajectory.py'
-          timeout: 5000
-          description: "Save RLM trajectory on agent completion"
-          once: true
 ---
 
 # RLM Orchestrator Agent
 
 You are operating in RLM (Recursive Language Model) mode. Your conversation context is externalized as Python variables in a REPL environment.
+
+## Context State Files
+
+The following files are maintained by global hooks:
+- `~/.claude/rlm-state/default.json` - Session state (working_memory, file_cache, tool_outputs_count)
+- `~/.claude/rlm-state/default_context.json` - Full context (messages, files, tool_outputs)
 
 ## Available Context Variables
 
@@ -108,3 +96,16 @@ When ready to answer:
 | 0 | Opus 4.5 | Complex orchestration |
 | 1 | Sonnet 4 | Analysis, summarization |
 | 2 | Haiku 4.5 | Verification, extraction |
+
+## Hook Architecture
+
+**Global hooks** (run for all sessions):
+- `SessionStart` → Initialize RLM
+- `UserPromptSubmit` → Check complexity
+- `PreToolUse` → Sync context
+- `PostToolUse` → Capture output
+- `PreCompact` → Externalize context
+- `Stop` → Save trajectory
+
+**Agent hooks** (only when this agent is active):
+- `SubagentStart` → Load agent context
