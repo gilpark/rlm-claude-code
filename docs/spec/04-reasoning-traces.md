@@ -68,6 +68,27 @@ Implement Deciduous-style reasoning traces with git integration, stored in the h
 
 [SPEC-04.24] Trajectory-to-decision mapping SHALL be configurable (on/off).
 
+### Event Types
+
+The following TrajectoryEventType values are supported:
+
+| Type | Description |
+|------|-------------|
+| `RLM_START` | RLM orchestration started |
+| `ANALYZE` | Context analysis phase |
+| `REPL_EXEC` | REPL code execution started |
+| `REPL_RESULT` | REPL execution result |
+| `REASON` | LLM reasoning/response |
+| `STREAM` | Real-time streaming token (for streaming mode) |
+| `RECURSE_START` | Recursive sub-query started |
+| `RECURSE_END` | Recursive sub-query completed |
+| `FINAL` | Final answer produced |
+| `ERROR` | Error occurred |
+| `TOOL_USE` | Tool invocation |
+| `COST_REPORT` | Cost tracking update |
+| `BUDGET_ALERT` | Budget threshold warning |
+| `VERIFICATION` | Epistemic verification checkpoint |
+
 ### Schema Extension
 
 [SPEC-04.25] The decisions table SHALL extend the memory schema:

@@ -454,11 +454,40 @@ print(f"Calls: {metrics.sub_call_count}")
 | `/rlm verbosity <minimal\|normal\|verbose\|debug>` | Set output detail |
 | `/rlm reset` | Reset to defaults |
 | `/rlm save` | Save preferences to disk |
+| `/rlm-orchestrator <task>` | Run RLM orchestration with context isolation |
 | `/simple` | Bypass RLM for current query |
 | `/trajectory <file>` | Analyze a trajectory file |
 | `/test` | Run test suite |
 | `/bench` | Run benchmarks |
 | `/code-review` | Review code changes |
+
+### Orchestrator CLI Options
+
+The `/rlm-orchestrator` command and `scripts/run_orchestrator.py` support:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--verbose` | `-v` | Print trajectory events and progress |
+| `--stream` | `-s` | Stream tokens in real-time (experimental) |
+| `--depth N` | `-d N` | Max recursion depth (default: 2) |
+| `--validate` | | Validate dependencies and exit |
+| `--status` | | Show RLM status and exit |
+| `--bypass` | | Set bypass flag |
+
+### Performance Features
+
+**Heartbeat Progress**: During long LLM calls, the orchestrator shows progress every 5 seconds:
+```
+[LLM] Waiting... 5s
+[LLM] Waiting... 10s
+```
+
+**Smart Verification Skip**: Epistemic verification is automatically skipped for:
+- Responses shorter than 100 characters
+- Queries without evidence files
+This eliminates unnecessary LLM calls for simple queries.
+
+**Streaming Mode**: Use `--stream` for real-time token output (experimental).
 
 ### Execution Modes
 

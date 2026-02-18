@@ -193,6 +193,29 @@ class RLMOrchestrator:
         return response
 ```
 
+### Smart Verification Skip (Performance Optimization)
+
+To reduce latency and API costs, verification is **automatically skipped** for simple responses:
+
+```python
+# Skip verification if:
+# 1. No final answer
+# 2. Verification disabled
+# 3. Response is very short (< 100 chars) - likely simple answer
+# 4. No evidence files to verify against
+should_verify = (
+    state.final_answer
+    and self.verification_config.enabled
+    and len(state.final_answer) >= 100
+    and len(context.files) > 0
+)
+```
+
+**Rationale**: Simple queries like "say hello" or "what is 2+2" don't need epistemic verification. This optimization:
+- Eliminates unnecessary 2nd LLM call for simple responses
+- Reduces latency by ~50% for straightforward queries
+- Saves API costs on trivial interactions
+
 ## Data Types
 
 ### ClaimVerification
