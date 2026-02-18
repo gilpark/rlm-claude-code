@@ -435,12 +435,25 @@ class RLMOrchestrator:
                 break
 
         # SPEC-16.22: Verification checkpoint (always-on unless disabled or /simple)
+        # Skip verification for simple/short responses to avoid unnecessary LLM calls
         verification_report: HallucinationReport | None = None
         retry_count = 0
         max_retries = self.verification_config.max_retries
         needs_user_intervention = False  # SPEC-16.24: Track if escalation needed
 
-        if state.final_answer and self.verification_config.enabled:
+        # Skip verification if:
+        # 1. No final answer
+        # 2. Verification disabled
+        # 3. Response is very short (< 100 chars) - likely simple answer
+        # 4. No evidence files to verify against
+        should_verify = (
+            state.final_answer
+            and self.verification_config.enabled
+            and len(state.final_answer) >= 100
+            and len(context.files) > 0
+        )
+
+        if should_verify:
             verification_report, should_retry = await self._verify_response(
                 state.final_answer, context, client, trajectory
             )

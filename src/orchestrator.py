@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from .api_client import ClaudeClient, Provider, init_client
+from .api_client import ClaudeClient, Provider, StreamChunk, init_client
 from .complexity_classifier import should_activate_rlm
 from .config import RLMConfig, default_config
 from .context_manager import externalize_context
@@ -47,6 +47,22 @@ def make_progress_callback(verbose: bool = False):
         print(f"[LLM] Waiting... {elapsed}s", file=sys.stderr)
 
     return on_progress
+
+
+def make_stream_callback(verbose: bool = False):
+    """Create a callback for streaming tokens."""
+    if not verbose:
+        return None
+
+    last_print = [0]  # Use list to allow mutation in closure
+
+    def on_token(text: str):
+        # Print tokens in real-time (flush for immediate output)
+        if text:
+            print(text, end="", flush=True, file=sys.stderr)
+            last_print[0] = time.time()
+
+    return on_token
 
 
 @dataclass
@@ -371,12 +387,25 @@ class RLMOrchestrator:
                 break
 
         # SPEC-16.22: Verification checkpoint (always-on unless disabled or /simple)
+        # Skip verification for simple/short responses to avoid unnecessary LLM calls
         verification_report: HallucinationReport | None = None
         retry_count = 0
         max_retries = self.verification_config.max_retries
         needs_user_intervention = False  # SPEC-16.24: Track if escalation needed
 
-        if state.final_answer and self.verification_config.enabled:
+        # Skip verification if:
+        # 1. No final answer
+        # 2. Verification disabled
+        # 3. Response is very short (< 100 chars) - likely simple answer
+        # 4. No evidence files to verify against
+        should_verify = (
+            state.final_answer
+            and self.verification_config.enabled
+            and len(state.final_answer) >= 100
+            and len(context.files) > 0
+        )
+
+        if should_verify:
             verification_report, should_retry = await self._verify_response(
                 state.final_answer, context, client, trajectory
             )
@@ -815,6 +844,206 @@ class RLMOrchestrator:
         ])
 
         return "".join(prompt_parts)
+
+
+class StreamingOrchestrator(RLMOrchestrator):
+    """
+    Streaming version of RLM orchestrator with real-time token output.
+
+    Uses complete_streaming() to show tokens as they arrive,
+    providing better UX for long-running LLM calls.
+    """
+
+    async def run_streaming(
+        self, query: str, context: SessionContext
+    ) -> AsyncIterator[TrajectoryEvent | str]:
+        """
+        Run RLM loop with streaming tokens.
+
+        Similar to run() but yields STREAM events with real-time tokens.
+        """
+        # Check if RLM should activate
+        rlm_mode_forced = self.config.activation.mode == "always"
+        simple_mode_forced = self.config.activation.mode == "manual" and not self.config.activation.fast_path_enabled
+        should_activate, self.activation_reason = should_activate_rlm(
+            query, context,
+            rlm_mode_forced=rlm_mode_forced,
+            simple_mode_forced=simple_mode_forced,
+        )
+
+        if not should_activate:
+            yield TrajectoryEvent(
+                type=TrajectoryEventType.FINAL,
+                depth=0,
+                content=f"[Direct mode: {self.activation_reason}]",
+            )
+            return
+
+        # Initialize components
+        client = self._ensure_client()
+        renderer = TrajectoryRenderer(
+            verbosity=self.config.trajectory.verbosity,
+            colors=self.config.trajectory.colors,
+        )
+        trajectory = StreamingTrajectory(renderer)
+
+        # Smart routing
+        selected_model = None
+        routing_reason = ""
+        if self.smart_routing:
+            router = self._get_router(client)
+            routing_decision = router.route(query)
+            selected_model = routing_decision.primary_model
+            routing_reason = f"{routing_decision.query_type.value} → {selected_model}"
+
+        # Initialize state
+        state = OrchestrationState(
+            max_turns=self.config.depth.max * 10,
+        )
+
+        # Start event
+        start_content = f"depth=0/{self.config.depth.max} • streaming"
+        if routing_reason:
+            start_content += f" • {routing_reason}"
+        start_event = TrajectoryEvent(
+            type=TrajectoryEventType.RLM_START,
+            depth=0,
+            content=start_content,
+            metadata={"query": query, "model": selected_model},
+        )
+        await trajectory.emit(start_event)
+        yield start_event
+
+        # Initialize REPL
+        recursive_handler = RecursiveREPL(
+            context=context,
+            depth=0,
+            config=self.config,
+            trajectory=trajectory,
+        )
+        repl = RLMEnvironment(context, recursive_handler=recursive_handler)
+
+        # Build system prompt
+        system_prompt = build_rlm_system_prompt(context, query)
+        state.messages = [{"role": "user", "content": query}]
+
+        # Main streaming loop
+        while state.turn < state.max_turns and state.final_answer is None:
+            state.turn += 1
+
+            # Stream response
+            accumulated_content = ""
+            input_tokens = 0
+            output_tokens = 0
+
+            try:
+                # Emit stream start event
+                stream_event = TrajectoryEvent(
+                    type=TrajectoryEventType.REASON,
+                    depth=state.depth,
+                    content="[streaming...]",
+                    metadata={"streaming": True},
+                )
+                await trajectory.emit(stream_event)
+                yield stream_event
+
+                # Collect streaming chunks
+                async for chunk in client.complete_streaming(
+                    messages=state.messages,
+                    system=system_prompt,
+                    model=selected_model,
+                    max_tokens=4096,
+                    component=CostComponent.ROOT_PROMPT,
+                ):
+                    if chunk.text:
+                        accumulated_content += chunk.text
+                        # Yield token as it arrives
+                        yield TrajectoryEvent(
+                            type=TrajectoryEventType.STREAM,
+                            depth=state.depth,
+                            content=chunk.text,
+                            metadata={"accumulated_len": len(accumulated_content)},
+                        )
+
+                    if chunk.is_final:
+                        input_tokens = chunk.input_tokens
+                        output_tokens = chunk.output_tokens
+
+            except Exception as e:
+                error_event = TrajectoryEvent(
+                    type=TrajectoryEventType.ERROR,
+                    depth=state.depth,
+                    content=f"API error: {e}",
+                )
+                await trajectory.emit(error_event)
+                yield error_event
+                state.error = str(e)
+                break
+
+            # Parse accumulated response
+            parsed_items = self.parser.parse(accumulated_content)
+
+            # Emit final reasoning event with stats
+            reason_event = TrajectoryEvent(
+                type=TrajectoryEventType.REASON,
+                depth=state.depth,
+                content=accumulated_content[:500],
+                metadata={
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "streaming": True,
+                },
+            )
+            await trajectory.emit(reason_event)
+            yield reason_event
+
+            if not parsed_items:
+                state.messages.append({"role": "assistant", "content": accumulated_content})
+                state.messages.append({
+                    "role": "user",
+                    "content": "Please continue. Use ```python blocks for REPL code, "
+                    "or output FINAL: <answer> when you have the answer.",
+                })
+                continue
+
+            # Process parsed items
+            for item in parsed_items:
+                if item.action == ResponseAction.FINAL_ANSWER:
+                    state.final_answer = item.content
+                    break
+                elif item.action == ResponseAction.FINAL_VAR:
+                    var_name = item.content
+                    try:
+                        var_value = repl.get_variable(var_name)
+                        state.final_answer = str(var_value)
+                    except KeyError:
+                        state.messages.append({"role": "assistant", "content": accumulated_content})
+                        state.messages.append({
+                            "role": "user",
+                            "content": f"Variable '{var_name}' not found.",
+                        })
+                    break
+                elif item.action == ResponseAction.REPL_EXECUTE:
+                    exec_result = repl.execute(item.content)
+                    repl_result = exec_result.output if exec_result.success else f"Error: {exec_result.error}"
+                    state.messages.append({"role": "assistant", "content": accumulated_content})
+                    state.messages.append({
+                        "role": "user",
+                        "content": f"REPL output:\n```\n{repl_result}\n```",
+                    })
+
+            if state.final_answer:
+                break
+
+        # Final event (skip verification for streaming to keep latency low)
+        final_event = TrajectoryEvent(
+            type=TrajectoryEventType.FINAL,
+            depth=0,
+            content=state.final_answer or "[No answer]",
+            metadata={"turns": state.turn, "streaming": True},
+        )
+        await trajectory.emit(final_event)
+        yield final_event
 
 
 async def main():

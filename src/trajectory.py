@@ -195,6 +195,7 @@ class TrajectoryEventType(Enum):
     COST_REPORT = "cost_report"
     BUDGET_ALERT = "budget_alert"
     VERIFICATION = "verification"  # SPEC-16.22: Epistemic verification checkpoint
+    STREAM = "stream"  # Real-time streaming token
 
     # Convenience aliases for common usage patterns
     REPL = "repl_exec"  # Alias for REPL_EXEC (start of REPL operation)

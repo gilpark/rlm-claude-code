@@ -508,7 +508,7 @@ class ClaudeHeadlessClient(BaseLLMClient):
 
             # Track elapsed time and emit progress
             start_time = time.monotonic()
-            heartbeat_interval = 10.0  # seconds between progress callbacks
+            heartbeat_interval = 5.0  # seconds between progress callbacks
 
             async def run_with_progress():
                 """Run subprocess with periodic progress callbacks."""

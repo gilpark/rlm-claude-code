@@ -201,6 +201,7 @@ async def run_orchestrator(
     query: str,
     depth: int = 2,
     verbose: bool = False,
+    stream: bool = False,
 ) -> str:
     """
     Run the RLM orchestrator on a query.
@@ -209,6 +210,7 @@ async def run_orchestrator(
         query: User query (includes task + file paths)
         depth: Maximum recursion depth (default 2)
         verbose: Print trajectory events
+        stream: Use streaming mode for real-time tokens
 
     Returns:
         Final answer from orchestrator
@@ -223,6 +225,8 @@ async def run_orchestrator(
 
     if verbose:
         print(f"[RLM] Starting orchestrator with query ({len(query)} chars)")
+        if stream:
+            print("[RLM] Streaming mode enabled")
 
     # Configure depth and force always mode
     config = RLMConfig(
@@ -230,7 +234,7 @@ async def run_orchestrator(
         activation=ActivationConfig(mode="always"),
     )
 
-    # Create orchestrator (auto-uses CLI if no API keys)
+    # Create orchestrator
     orchestrator = RLMOrchestrator(config=config)
 
     # Run and collect result
@@ -240,7 +244,11 @@ async def run_orchestrator(
             if event.type == TrajectoryEventType.RLM_START:
                 print(f"[RLM] {event.content}")
             elif event.type == TrajectoryEventType.REASON:
-                print(f"[REASON] depth={event.depth} tokens={event.metadata.get('input_tokens', 0)}")
+                tokens = event.metadata.get('input_tokens', 0)
+                print(f"[REASON] depth={event.depth} tokens={tokens}")
+            elif event.type == TrajectoryEventType.STREAM:
+                # Print streaming tokens in real-time
+                print(event.content, end="", flush=True)
             elif event.type == TrajectoryEventType.REPL_EXEC:
                 print(f"[REPL] {event.content[:100]}...")
             elif event.type == TrajectoryEventType.RECURSE_START:
@@ -250,6 +258,10 @@ async def run_orchestrator(
 
         if event.type == TrajectoryEventType.FINAL:
             final_answer = event.content
+
+    # Add newline after streaming
+    if stream and verbose:
+        print()
 
     return final_answer or "No answer produced"
 
@@ -278,6 +290,7 @@ Examples:
     parser.add_argument("--query", "-q", dest="query_flag", help="Query to process (alternative)")
     parser.add_argument("--depth", "-d", type=int, default=2, help="Max recursion depth (default: 2)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print trajectory events")
+    parser.add_argument("--stream", "-s", action="store_true", help="Stream tokens in real-time")
 
     # Utility commands
     parser.add_argument("--validate", action="store_true", help="Validate dependencies")
@@ -312,7 +325,7 @@ Examples:
     # Run orchestrator
     try:
         result = asyncio.run(
-            run_orchestrator(query, depth=args.depth, verbose=args.verbose)
+            run_orchestrator(query, depth=args.depth, verbose=args.verbose, stream=args.stream)
         )
         print(result)
     except KeyboardInterrupt:
