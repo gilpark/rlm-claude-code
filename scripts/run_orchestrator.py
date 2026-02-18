@@ -57,7 +57,22 @@ def get_state_dir() -> Path:
 
 
 def load_context_from_disk() -> dict[str, Any]:
-    """Load context from state file (written by hooks). Fallback only."""
+    """Load context from transcript file (preferred) or state file (fallback)."""
+    # Try transcript parser first (more complete)
+    try:
+        from src.transcript_parser import load_session_context
+        transcript_context = load_session_context()
+        if transcript_context and not transcript_context.get("error"):
+            return {
+                "conversation": transcript_context.get("messages", []),
+                "files": transcript_context.get("files", {}),
+                "tool_outputs": list(transcript_context.get("tool_outputs", {}).values()),
+                "working_memory": transcript_context.get("metadata", {}),
+            }
+    except ImportError:
+        pass
+
+    # Fallback to state file
     ctx_file = get_state_dir() / "context.json"
     if ctx_file.exists():
         try:
@@ -75,9 +90,9 @@ def load_context_from_disk() -> dict[str, Any]:
 def build_context(
     files: dict[str, str] | None = None,
     working_memory: dict[str, Any] | None = None,
-    use_disk_fallback: bool = False,
+    use_disk_fallback: bool = True,  # Changed default to True
 ) -> dict[str, Any]:
-    """Build context from files or disk fallback."""
+    """Build context from files or disk fallback (transcript)."""
     context = {
         "conversation": [],
         "files": files or {},
@@ -85,12 +100,14 @@ def build_context(
         "working_memory": working_memory or {},
     }
 
-    # If no files provided and fallback enabled, try disk
+    # If no files provided and fallback enabled, try disk (transcript)
     if not context["files"] and use_disk_fallback:
         disk_context = load_context_from_disk()
         if disk_context.get("files"):
             context["files"] = disk_context["files"]
             context["working_memory"] = disk_context.get("working_memory", {})
+        if disk_context.get("conversation"):
+            context["conversation"] = disk_context["conversation"]
 
     return context
 
@@ -197,6 +214,60 @@ def do_bypass() -> dict[str, Any]:
     return {"status": "bypass_set"}
 
 
+async def run_rlaph(
+    query: str,
+    depth: int = 2,
+    verbose: bool = False,
+) -> str:
+    """
+    Run the RLAPH loop (clean synchronous llm() mode).
+
+    Key difference from legacy orchestrator:
+    - llm() returns actual result immediately (not DeferredOperation)
+    - Single clean loop, easier to debug
+    - No deferred operation processing
+
+    Args:
+        query: User query (includes task + file paths)
+        depth: Maximum recursion depth (default 2)
+        verbose: Print trajectory events
+
+    Returns:
+        Final answer from RLAPH loop
+    """
+    from src.rlaph_loop import RLAPHLoop
+    from src.config import RLMConfig
+    from src.trajectory import TrajectoryRenderer
+
+    # Build empty context - files are read by REPL as needed
+    context_data = build_context(files={}, use_disk_fallback=False)
+    context = build_session_context(context_data)
+
+    if verbose:
+        print(f"[RLAPH] Starting loop with query ({len(query)} chars)")
+        print(f"[RLAPH] Max depth: {depth}")
+
+    # Create renderer for verbose output
+    renderer = TrajectoryRenderer(verbosity="verbose") if verbose else None
+
+    # Create RLAPH loop
+    loop = RLAPHLoop(
+        max_iterations=20,
+        max_depth=depth,
+        renderer=renderer,
+    )
+
+    # Run loop
+    result = await loop.run(query, context)
+
+    if verbose:
+        print(f"[RLAPH] Completed in {result.iterations} iterations")
+        print(f"[RLAPH] Tokens used: {result.tokens_used}")
+        print(f"[RLAPH] Execution time: {result.execution_time_ms:.0f}ms")
+
+    return result.answer
+
+
 async def run_orchestrator(
     query: str,
     depth: int = 2,
@@ -291,6 +362,7 @@ Examples:
     parser.add_argument("--depth", "-d", type=int, default=2, help="Max recursion depth (default: 2)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print trajectory events")
     parser.add_argument("--stream", "-s", action="store_true", help="Stream tokens in real-time")
+    parser.add_argument("--legacy", action="store_true", help="Use legacy orchestrator (default: RLAPH)")
 
     # Utility commands
     parser.add_argument("--validate", action="store_true", help="Validate dependencies")
@@ -322,11 +394,18 @@ Examples:
     if not query:
         parser.error("Query required. Provide as argument or use --query")
 
-    # Run orchestrator
+    # Run orchestrator (RLAPH is default, --legacy for old mode)
     try:
-        result = asyncio.run(
-            run_orchestrator(query, depth=args.depth, verbose=args.verbose, stream=args.stream)
-        )
+        if args.legacy:
+            # Use legacy orchestrator
+            result = asyncio.run(
+                run_orchestrator(query, depth=args.depth, verbose=args.verbose, stream=args.stream)
+            )
+        else:
+            # Use RLAPH loop (default) - clean synchronous llm() mode
+            result = asyncio.run(
+                run_rlaph(query, depth=args.depth, verbose=args.verbose)
+            )
         print(result)
     except KeyboardInterrupt:
         print("\n[interrupted]")

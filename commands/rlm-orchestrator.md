@@ -38,6 +38,7 @@ Main Claude:
 
 | Flag | Short | Description |
 |------|-------|-------------|
+| `--legacy` | | Use legacy orchestrator (default: RLAPH) |
 | `--verbose` | `-v` | Print trajectory events and progress |
 | `--stream` | `-s` | Stream tokens in real-time (experimental) |
 | `--depth N` | `-d N` | Max recursion depth (default: 2) |
@@ -77,7 +78,7 @@ Use Bash to run the Python script with the composed prompt:
 
 ```bash
 cd ${CLAUDE_PLUGIN_ROOT}
-uv run python scripts/run_orchestrator.py --verbose "<composed prompt>"
+uv run python scripts/run_orchestrator.py --stream --verbose "<composed prompt>"
 ```
 
 ### Step 4: Report Answer
@@ -121,11 +122,20 @@ Shows trajectory events like:
 [REPL] result = ...
 ```
 
+### With RLAPH Mode (Recommended)
+
+User: `/rlm-orchestrator --rlaph analyze the auth flow`
+
+RLAPH mode uses a clean loop where `llm()` returns actual results immediately (not deferred). This is faster and easier to debug.
+
 ### Direct Script Usage
 
 ```bash
+# RLAPH mode (recommended)
+uv run python scripts/run_orchestrator.py --rlaph "analyze auth"
+
 # Verbose mode
-uv run python scripts/run_orchestrator.py --verbose "analyze auth"
+uv run python scripts/run_orchestrator.py --stream --verbose "analyze auth"
 
 # With streaming (experimental)
 uv run python scripts/run_orchestrator.py --stream "explain architecture"

@@ -633,6 +633,97 @@ class StreamingTrajectory:
                 f.write(data)
         return data
 
+    def emit_recursive_start(
+        self,
+        depth: int,
+        query: str,
+        spawn_repl: bool = False,
+    ) -> None:
+        """Emit recursive call start event (sync wrapper for async emit)."""
+        import asyncio
+        event = TrajectoryEvent(
+            type=TrajectoryEventType.RECURSE_START,
+            depth=depth,
+            content=f"Recursive call: {query[:100]}",
+            metadata={"spawn_repl": spawn_repl},
+        )
+        self.events.append(event)
+        # Try to emit async if there's a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.emit(event))
+        except RuntimeError:
+            pass  # No running loop, event is stored
+
+    def emit_model_downgrade(
+        self,
+        original_model: str,
+        new_model: str,
+        reason: str,
+        budget_utilization: float,
+    ) -> None:
+        """Emit model downgrade event for adaptive depth."""
+        import asyncio
+        event = TrajectoryEvent(
+            type=TrajectoryEventType.INFO,
+            depth=0,
+            content=f"Model downgrade: {original_model} → {new_model} ({reason})",
+            metadata={
+                "original_model": original_model,
+                "new_model": new_model,
+                "reason": reason,
+                "budget_utilization": budget_utilization,
+            },
+        )
+        self.events.append(event)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.emit(event))
+        except RuntimeError:
+            pass
+
+    def emit_recursive_complete(
+        self,
+        depth: int,
+        tokens_used: int,
+        execution_time_ms: float,
+    ) -> None:
+        """Emit recursive call completion event (sync wrapper for async emit)."""
+        import asyncio
+        event = TrajectoryEvent(
+            type=TrajectoryEventType.RECURSE_END,
+            depth=depth,
+            content=f"Recursive complete: {tokens_used} tokens, {execution_time_ms:.0f}ms",
+            metadata={"tokens_used": tokens_used, "execution_time_ms": execution_time_ms},
+        )
+        self.events.append(event)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.emit(event))
+        except RuntimeError:
+            pass
+
+    def emit_recursive_error(
+        self,
+        depth: int,
+        error: str,
+        recoverable: bool = True,
+    ) -> None:
+        """Emit recursive call error event (sync wrapper for async emit)."""
+        import asyncio
+        event = TrajectoryEvent(
+            type=TrajectoryEventType.ERROR,
+            depth=depth,
+            content=f"Recursive error: {error}",
+            metadata={"error": error, "recoverable": recoverable},
+        )
+        self.events.append(event)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.emit(event))
+        except RuntimeError:
+            pass
+
 
 class TrajectoryStream:
     """

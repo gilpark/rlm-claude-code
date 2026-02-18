@@ -224,6 +224,55 @@ class RecursiveREPL:
                 )
             raise
 
+    def llm_sync(self, query: str, context: str = "") -> str:
+        """
+        Synchronous LLM call - returns actual result immediately.
+
+        This is the key method for RLAPH-style loop: llm() returns the
+        actual string result instead of a DeferredOperation.
+
+        Uses a separate thread with its own event loop to avoid blocking
+        the parent async context.
+
+        Args:
+            query: Query string for sub-call
+            context: Optional context string
+
+        Returns:
+            LLM response as string
+
+        Raises:
+            RecursionDepthError: If max depth exceeded
+            CostLimitError: If cost limits exceeded
+        """
+        import asyncio
+        import concurrent.futures
+        import threading
+
+        def run_in_thread():
+            """Run the async query in a new thread with its own event loop."""
+            # Create a new event loop for this thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(self.recursive_query(query, context))
+            finally:
+                new_loop.close()
+
+        try:
+            # Check if we're in an async context
+            asyncio.get_running_loop()
+
+            # We're in async context - run in a separate thread
+            # to avoid blocking/nesting issues
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_in_thread)
+                return future.result(timeout=120.0)  # 2 minute timeout
+
+        except RuntimeError:
+            # No running loop, can run directly
+            return asyncio.run(self.recursive_query(query, context))
+
     async def _spawn_child_repl(
         self,
         query: str,

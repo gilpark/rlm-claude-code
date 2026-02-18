@@ -801,11 +801,14 @@ class RLMEnvironment:
         query: str,
         context: Any = None,
         spawn_repl: bool = False,
-    ) -> DeferredOperation:
+    ) -> str:
         """
-        Spawn a recursive sub-query.
+        Spawn a recursive sub-query - RLAPH style (synchronous).
 
         Implements: Spec §4.2 Recursive Call Implementation
+
+        RLAPH Mode: Returns actual result immediately instead of DeferredOperation.
+        This allows LLM to use the result in the same code block.
 
         Args:
             query: Query string for sub-call
@@ -813,13 +816,22 @@ class RLMEnvironment:
             spawn_repl: If True, child gets its own REPL
 
         Returns:
-            DeferredOperation that will be resolved by orchestrator
-        """
-        self._operation_counter += 1
-        op_id = f"rq_{self._operation_counter}"
+            LLM response as string (actual result, not deferred)
 
+        Raises:
+            RuntimeError: If no recursive handler available
+        """
         # Convert context to string if not None
         context_str = str(context)[:8000] if context is not None else ""
+
+        # RLAPH mode: Use synchronous handler
+        if self.recursive_handler:
+            return self.recursive_handler.llm_sync(query, context_str)
+
+        # Fallback: Legacy deferred mode (for backward compatibility)
+        # This path is kept for micro mode or when no handler is available
+        self._operation_counter += 1
+        op_id = f"rq_{self._operation_counter}"
 
         op = DeferredOperation(
             operation_id=op_id,
@@ -829,7 +841,7 @@ class RLMEnvironment:
             spawn_repl=spawn_repl,
         )
         self.pending_operations.append(op)
-        return op
+        return f"<<DEFERRED:{op_id}>> (no handler - use working_memory[{op_id}])"
 
     def _llm_batch(
         self,

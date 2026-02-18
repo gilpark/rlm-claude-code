@@ -40,7 +40,7 @@ class ResponseParser:
 
     # Patterns for extracting content
     PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
-    FINAL_ANSWER = re.compile(r"FINAL:\s*(.+?)(?:\n\n|\Z)", re.DOTALL)
+    FINAL_ANSWER = re.compile(r"FINAL:\s*(.+)", re.DOTALL)  # Capture everything after FINAL:
     FINAL_VAR = re.compile(r"FINAL_VAR:\s*(\w+)")
 
     def parse(self, response: str) -> list[ParsedResponse]:
@@ -55,34 +55,8 @@ class ResponseParser:
         """
         results: list[ParsedResponse] = []
 
-        # Check for FINAL answer first (highest priority)
-        final_match = self.FINAL_ANSWER.search(response)
-        if final_match:
-            # Extract reasoning before FINAL
-            reasoning = response[: final_match.start()].strip()
-            results.append(
-                ParsedResponse(
-                    action=ResponseAction.FINAL_ANSWER,
-                    content=final_match.group(1).strip(),
-                    reasoning=reasoning,
-                )
-            )
-            return results
-
-        # Check for FINAL_VAR
-        var_match = self.FINAL_VAR.search(response)
-        if var_match:
-            reasoning = response[: var_match.start()].strip()
-            results.append(
-                ParsedResponse(
-                    action=ResponseAction.FINAL_VAR,
-                    content=var_match.group(1),
-                    reasoning=reasoning,
-                )
-            )
-            return results
-
-        # Extract Python blocks for REPL execution
+        # Extract Python blocks for REPL execution FIRST
+        # This ensures code is executed before checking for FINAL
         python_blocks = self.PYTHON_BLOCK.findall(response)
         if python_blocks:
             # Get reasoning (text before first code block)
@@ -100,6 +74,44 @@ class ResponseParser:
                 # Only use reasoning for first block
                 reasoning = ""
 
+            # After executing code, check for FINAL_VAR to get result
+            var_match = self.FINAL_VAR.search(response)
+            if var_match:
+                results.append(
+                    ParsedResponse(
+                        action=ResponseAction.FINAL_VAR,
+                        content=var_match.group(1),
+                        reasoning="",
+                    )
+                )
+
+            return results
+
+        # Check for FINAL answer (no code to execute)
+        final_match = self.FINAL_ANSWER.search(response)
+        if final_match:
+            # Extract reasoning before FINAL
+            reasoning = response[: final_match.start()].strip()
+            results.append(
+                ParsedResponse(
+                    action=ResponseAction.FINAL_ANSWER,
+                    content=final_match.group(1).strip(),
+                    reasoning=reasoning,
+                )
+            )
+            return results
+
+        # Check for FINAL_VAR (no code to execute)
+        var_match = self.FINAL_VAR.search(response)
+        if var_match:
+            reasoning = response[: var_match.start()].strip()
+            results.append(
+                ParsedResponse(
+                    action=ResponseAction.FINAL_VAR,
+                    content=var_match.group(1),
+                    reasoning=reasoning,
+                )
+            )
             return results
 
         # No actionable content - treat as thinking/reasoning
