@@ -15,14 +15,11 @@ if TYPE_CHECKING:
 class FrameStatus(Enum):
     """Lifecycle states for a CausalFrame."""
 
-    CREATED = "created"        # Frame created, not yet running
-    RUNNING = "running"        # Frame is actively executing
-    COMPLETED = "completed"    # Frame finished execution
-    VERIFIED = "verified"      # Frame output verified
-    PROMOTED = "promoted"      # Promoted to memory_store
+    RUNNING = "running"          # Frame is actively executing
+    COMPLETED = "completed"      # Frame finished execution
+    SUSPENDED = "suspended"      # Pivot — preserved, not deleted
     INVALIDATED = "invalidated"  # Cascade invalidation
-    SUSPENDED = "suspended"    # Low confidence / needs human
-    UNCERTAIN = "uncertain"    # Propagated uncertainty
+    PROMOTED = "promoted"        # Persisted as long-term knowledge
 
 
 @dataclass
