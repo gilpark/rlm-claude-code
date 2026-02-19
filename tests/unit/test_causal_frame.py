@@ -1,6 +1,9 @@
 """Tests for CausalFrame and related types."""
 
-from src.causal_frame import FrameStatus
+from datetime import datetime
+
+from src.causal_frame import CausalFrame, FrameStatus
+from src.context_slice import ContextSlice
 
 
 def test_frame_status_has_all_values():
@@ -18,3 +21,64 @@ def test_frame_status_has_all_values():
 def test_frame_status_count():
     """Should have exactly 8 status values."""
     assert len(FrameStatus) == 8
+
+
+def test_causal_frame_creation():
+    """CausalFrame should be creatable with all fields."""
+    context = ContextSlice(
+        files={"test.py": "abc123"},
+        memory_refs=[],
+        tool_outputs={},
+        token_budget=1000
+    )
+    frame = CausalFrame(
+        frame_id="test123",
+        depth=0,
+        parent_id=None,
+        children=[],
+        query="test query",
+        context_slice=context,
+        evidence=[],
+        conclusion=None,
+        confidence=0.8,
+        invalidation_condition="always valid",
+        status=FrameStatus.CREATED,
+        branched_from=None,
+        escalation_reason=None,
+        created_at=datetime.now(),
+        completed_at=None
+    )
+    assert frame.frame_id == "test123"
+    assert frame.depth == 0
+    assert frame.status == FrameStatus.CREATED
+    assert frame.confidence == 0.8
+
+
+def test_causal_frame_with_branch_fields():
+    """CausalFrame should support branch management fields."""
+    context = ContextSlice(
+        files={},
+        memory_refs=[],
+        tool_outputs={},
+        token_budget=1000
+    )
+    frame = CausalFrame(
+        frame_id="child1",
+        depth=1,
+        parent_id="root",
+        children=[],
+        query="child query",
+        context_slice=context,
+        evidence=["root"],
+        conclusion="result",
+        confidence=0.6,
+        invalidation_condition="test",
+        status=FrameStatus.SUSPENDED,
+        branched_from="root",
+        escalation_reason="low confidence",
+        created_at=datetime.now(),
+        completed_at=datetime.now()
+    )
+    assert frame.branched_from == "root"
+    assert frame.escalation_reason == "low confidence"
+    assert frame.status == FrameStatus.SUSPENDED
