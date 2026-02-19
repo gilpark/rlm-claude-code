@@ -40,6 +40,15 @@ class FrameIndex:
         """Get all frames that branched from another frame."""
         return [f for f in self._frames.values() if f.branched_from is not None]
 
+    def find_by_parent(self, parent_id: str) -> list["CausalFrame"]:
+        """Find all frames with a given parent."""
+        return [f for f in self._frames.values() if f.parent_id == parent_id]
+
+    def find_promoted(self) -> list["CausalFrame"]:
+        """Find all PROMOTED frames (persisted facts)."""
+        from .causal_frame import FrameStatus
+        return [f for f in self._frames.values() if f.status == FrameStatus.PROMOTED]
+
     def __contains__(self, frame_id: str) -> bool:
         return frame_id in self._frames
 

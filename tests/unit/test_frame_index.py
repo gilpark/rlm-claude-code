@@ -10,7 +10,7 @@ from src.frame_index import FrameIndex
 def make_frame(
     frame_id: str,
     parent_id: str | None = None,
-    status: FrameStatus = FrameStatus.CREATED,
+    status: FrameStatus = FrameStatus.RUNNING,
     branched_from: str | None = None
 ) -> CausalFrame:
     """Helper to create a CausalFrame for testing."""
@@ -96,3 +96,49 @@ def test_frame_index_len():
     index.add(make_frame("f1"))
     index.add(make_frame("f2"))
     assert len(index) == 2
+
+
+def test_frame_index_find_by_parent():
+    """FrameIndex.find_by_parent returns children of a frame."""
+    index = FrameIndex()
+    parent = make_frame("parent", status=FrameStatus.COMPLETED)
+    child1 = make_frame("child1", parent_id="parent", status=FrameStatus.COMPLETED)
+    child2 = make_frame("child2", parent_id="parent", status=FrameStatus.RUNNING)
+    other = make_frame("other", status=FrameStatus.COMPLETED)
+
+    index.add(parent)
+    index.add(child1)
+    index.add(child2)
+    index.add(other)
+
+    children = index.find_by_parent("parent")
+    assert len(children) == 2
+    child_ids = {f.frame_id for f in children}
+    assert child_ids == {"child1", "child2"}
+
+
+def test_frame_index_find_by_parent_no_children():
+    """FrameIndex.find_by_parent returns empty list if no children."""
+    index = FrameIndex()
+    frame = make_frame("frame1")
+    index.add(frame)
+
+    children = index.find_by_parent("frame1")
+    assert children == []
+
+
+def test_frame_index_find_promoted():
+    """FrameIndex.find_promoted returns PROMOTED frames."""
+    index = FrameIndex()
+    promoted1 = make_frame("p1", status=FrameStatus.PROMOTED)
+    promoted2 = make_frame("p2", status=FrameStatus.PROMOTED)
+    running = make_frame("r1", status=FrameStatus.RUNNING)
+
+    index.add(promoted1)
+    index.add(promoted2)
+    index.add(running)
+
+    promoted = index.find_promoted()
+    assert len(promoted) == 2
+    promoted_ids = {f.frame_id for f in promoted}
+    assert promoted_ids == {"p1", "p2"}
