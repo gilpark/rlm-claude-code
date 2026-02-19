@@ -289,3 +289,29 @@ class CostLimitError(RLMError):
         self.tokens_used = tokens_used
         self.limit = limit
         super().__init__(f"Token usage {tokens_used} exceeds limit {limit}")
+
+
+# =============================================================================
+# Causal Frame Types (v4)
+# =============================================================================
+
+# Re-export causal frame types for convenience
+# These are defined in their own modules but exposed here for easy import
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
+    from .context_slice import ContextSlice
+    from .frame_index import FrameIndex
+    from .frame_lifecycle import FrameLifecycle
+    from .frame_invalidation import propagate_invalidation
+    from .frame_serialization import serialize_frame, deserialize_frame
+    from .session_artifacts import SessionArtifacts, FileRecord
+    from .session_comparison import SessionDiff, compare_sessions
+    from .plugin_interface import CoreContext, RLMPlugin, PluginError
+    from .plugin_registry import PluginRegistry
+
+# Frame-related type aliases
+FrameId = str
+FrameIndexDict = dict[FrameId, "CausalFrame"]
