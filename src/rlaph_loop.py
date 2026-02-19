@@ -28,9 +28,9 @@ from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
 from .config import RLMConfig, default_config
 from .context_slice import ContextSlice
 from .frame_index import FrameIndex
+from .llm_client import LLMClient
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
-from .router_integration import ModelRouter
 from .trajectory import StreamingTrajectory, TrajectoryEvent, TrajectoryEventType
 from .types import RecursionDepthError, SessionContext
 
@@ -87,7 +87,7 @@ class RLAPHLoop:
         max_iterations: int = 20,
         max_depth: int = 3,
         config: RLMConfig | None = None,
-        router: ModelRouter | None = None,
+        llm_client: LLMClient | None = None,
         renderer: TrajectoryRenderer | None = None,
     ):
         """
@@ -97,13 +97,13 @@ class RLAPHLoop:
             max_iterations: Maximum loop iterations
             max_depth: Maximum recursion depth for llm() calls
             config: RLM configuration
-            router: Model router for API calls
+            llm_client: LLM client for API calls
             renderer: Trajectory renderer for output
         """
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.config = config or default_config
-        self.router = router or ModelRouter(self.config)
+        self.llm_client = llm_client or LLMClient()
 
         # State
         self.repl: RLMEnvironment | None = None
@@ -190,7 +190,7 @@ class RLAPHLoop:
             depth=self._depth,
             max_depth=self.max_depth,
             config=self.config,
-            router=self.router,
+            llm_client=self.llm_client,
             trajectory=self.trajectory,
             parent_frame_id=self._current_frame_id,  # Pass for CausalFrame tree (SPEC-17)
         )
@@ -226,15 +226,16 @@ class RLAPHLoop:
             # Get LLM response - convert messages to prompt
             model = self._get_model_for_depth()
             prompt = self._messages_to_prompt(state.messages)
-            response = await self.router.complete(
+            response_content = self.llm_client.call(
+                query=prompt,
                 model=model,
-                prompt=prompt,
                 system=system_prompt,
                 max_tokens=16384,
+                depth=self._depth,
             )
 
             # Track tokens
-            self._tokens_used += len(response.content) // 4  # Rough estimate
+            self._tokens_used += len(response_content) // 4  # Rough estimate
 
             # Emit reasoning event
             if self.trajectory:
@@ -242,13 +243,13 @@ class RLAPHLoop:
                     TrajectoryEvent(
                         type=TrajectoryEventType.REASON,
                         depth=self._depth,
-                        content=response.content[:500],
+                        content=response_content[:500],
                         metadata={"turn": state.turn, "model": model},
                     )
                 )
 
             # Parse response
-            parsed_items = self.parser.parse(response.content)
+            parsed_items = self.parser.parse(response_content)
 
             # Process each parsed item
             for item in parsed_items:
@@ -344,7 +345,7 @@ class RLAPHLoop:
                         truncated_result += f"\n... [truncated, {len(repl_result_str)} chars total]"
 
                     # Add to conversation
-                    state.messages.append({"role": "assistant", "content": response.content})
+                    state.messages.append({"role": "assistant", "content": response_content})
                     state.messages.append(
                         {
                             "role": "user",
@@ -364,7 +365,7 @@ class RLAPHLoop:
                             state.final_answer = item.content
                             break
 
-                    state.messages.append({"role": "assistant", "content": response.content})
+                    state.messages.append({"role": "assistant", "content": response_content})
                     state.messages.append(
                         {
                             "role": "user",
