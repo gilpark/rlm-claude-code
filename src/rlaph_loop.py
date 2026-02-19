@@ -16,6 +16,7 @@ import asyncio
 import time
 import warnings
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +24,10 @@ from typing import TYPE_CHECKING, Any
 warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="RestrictedPython")
 
+from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
 from .config import RLMConfig, default_config
+from .context_slice import ContextSlice
+from .frame_index import FrameIndex
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
 from .router_integration import ModelRouter
@@ -116,6 +120,22 @@ class RLAPHLoop:
 
         # Parser
         self.parser = ResponseParser()
+
+        # CausalFrame tracking (SPEC-17)
+        self.frame_index: FrameIndex = FrameIndex()
+        self._current_frame_id: str | None = None
+
+    def _collect_evidence(self) -> list[str]:
+        """
+        Collect frame IDs that current execution depends on.
+
+        NOTE: This is a stub implementation. Full implementation requires
+        AST analysis or variable tracking to detect which frames' results
+        were used in current code.
+        """
+        # TODO: Implement proper evidence collection
+        # For now, return empty list - evidence must be added manually
+        return []
 
     @property
     def depth(self) -> int:
@@ -275,6 +295,45 @@ class RLAPHLoop:
                                 content=str(repl_result)[:500],
                             )
                         )
+
+                    # === POST-HOC FRAME CREATION (SPEC-17) ===
+                    context_slice = ContextSlice(
+                        files=dict(self.repl.files_read),
+                        memory_refs=list(self.repl.memory_refs),
+                        tool_outputs=dict(self.repl.tool_outputs_tracked),
+                        token_budget=self.config.cost_controls.max_tokens_per_recursive_call,
+                    )
+
+                    frame = CausalFrame(
+                        frame_id=compute_frame_id(
+                            self._current_frame_id,
+                            code[:100],  # Use code snippet as query
+                            context_slice,
+                        ),
+                        depth=self._depth,
+                        parent_id=self._current_frame_id,
+                        children=[],
+                        query=code[:200],
+                        context_slice=context_slice,
+                        evidence=self._collect_evidence(),
+                        conclusion=str(exec_result.output)[:500] if exec_result.success else None,
+                        confidence=0.8,  # Default, can be updated
+                        invalidation_condition="",
+                        status=FrameStatus.COMPLETED if exec_result.success else FrameStatus.INVALIDATED,
+                        branched_from=None,
+                        escalation_reason=exec_result.error if not exec_result.success else None,
+                        created_at=datetime.now(),
+                        completed_at=datetime.now(),
+                    )
+
+                    self.frame_index.add(frame)
+                    self._current_frame_id = frame.frame_id
+
+                    # Clear tracking for next frame
+                    self.repl.files_read.clear()
+                    self.repl.tool_outputs_tracked.clear()
+                    self.repl.memory_refs.clear()
+                    # === END FRAME CREATION ===
 
                     # Truncate REPL output
                     MAX_REPL_OUTPUT = 1500

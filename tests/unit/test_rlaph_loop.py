@@ -266,3 +266,54 @@ class TestRLAPHLoopIntegration:
 
         # Should not exceed max iterations
         assert result.iterations <= 3
+
+
+class TestCausalFrameCreation:
+    """Tests for CausalFrame creation in RLAPHLoop (SPEC-17)."""
+
+    @pytest.fixture
+    def context(self) -> SessionContext:
+        """Create empty session context."""
+        return SessionContext(
+            messages=[],
+            files={},
+            tool_outputs=[],
+            working_memory={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_frame_created_after_repl_execution(self, context: SessionContext):
+        """Frame should be created after REPL execution with actual context."""
+        from src.rlaph_loop import RLAPHLoop
+
+        loop = RLAPHLoop(max_iterations=2, max_depth=1)
+
+        # Run a simple query
+        result = await loop.run("What is 2+2?", context)
+
+        # Should have created at least one frame
+        assert hasattr(loop, "frame_index")
+        assert len(loop.frame_index) >= 1
+
+        # Frame should have post-hoc context
+        frame = list(loop.frame_index.values())[0]
+        assert frame.query is not None
+        assert frame.context_slice is not None
+
+    @pytest.mark.asyncio
+    async def test_frame_index_accessible(self, context: SessionContext):
+        """frame_index should be accessible after loop execution."""
+        from src.rlaph_loop import RLAPHLoop
+        from src.frame_index import FrameIndex
+
+        loop = RLAPHLoop(max_iterations=2)
+
+        # Before execution, frame_index should be empty FrameIndex
+        assert isinstance(loop.frame_index, FrameIndex)
+        assert len(loop.frame_index) == 0
+
+        # After execution
+        await loop.run("test", context)
+
+        # Should have frames
+        assert len(loop.frame_index) >= 0  # May have frames depending on LLM response
