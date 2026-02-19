@@ -82,3 +82,46 @@ def test_causal_frame_with_branch_fields():
     assert frame.branched_from == "root"
     assert frame.escalation_reason == "low confidence"
     assert frame.status == FrameStatus.SUSPENDED
+
+
+# Tests for compute_frame_id
+from src.causal_frame import compute_frame_id
+
+
+def test_compute_frame_id_is_deterministic():
+    """Same inputs should produce same frame_id."""
+    context = ContextSlice(
+        files={"a.py": "hash1"},
+        memory_refs=[],
+        tool_outputs={},
+        token_budget=1000
+    )
+    id1 = compute_frame_id("parent1", "query1", context)
+    id2 = compute_frame_id("parent1", "query1", context)
+    assert id1 == id2
+    assert len(id1) == 16  # 16 hex chars
+
+
+def test_compute_frame_id_differs_with_query():
+    """Different query should produce different frame_id."""
+    context = ContextSlice(
+        files={"a.py": "hash1"},
+        memory_refs=[],
+        tool_outputs={},
+        token_budget=1000
+    )
+    id1 = compute_frame_id("parent1", "query1", context)
+    id2 = compute_frame_id("parent1", "query2", context)
+    assert id1 != id2
+
+
+def test_compute_frame_id_handles_none_parent():
+    """Root frames (None parent) should work."""
+    context = ContextSlice(
+        files={"a.py": "hash1"},
+        memory_refs=[],
+        tool_outputs={},
+        token_budget=1000
+    )
+    id1 = compute_frame_id(None, "query1", context)
+    assert len(id1) == 16

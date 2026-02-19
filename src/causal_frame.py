@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -56,3 +57,17 @@ class CausalFrame:
 
     created_at: datetime
     completed_at: datetime | None
+
+
+def compute_frame_id(
+    parent_id: str | None,
+    query: str,
+    context_slice: "ContextSlice"
+) -> str:
+    """
+    Compute deterministic frame ID for caching and deduplication.
+
+    Same (parent, query, context) = same frame_id = cache hit.
+    """
+    content = f"{parent_id}:{query}:{context_slice.hash()}"
+    return hashlib.sha256(content.encode()).hexdigest()[:16]
