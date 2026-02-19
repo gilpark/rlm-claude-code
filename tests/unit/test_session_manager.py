@@ -520,3 +520,163 @@ class TestSessionStateSchema:
         assert state.metadata.session_id == "dict-test"
         assert state.activation.rlm_active is True
         assert state.context.working_memory["key"] == "value"
+
+
+# Causal Frame Tests
+
+
+class TestCausalFrameStorage:
+    """Tests for CausalFrame storage in SessionManager."""
+
+    @pytest.fixture
+    def temp_sessions_dir(self):
+        """Create temporary sessions directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def session_manager(self, temp_sessions_dir):
+        """Create SessionManager with temp directory."""
+        return SessionManager(base_dir=temp_sessions_dir)
+
+    def test_save_frame_stores_causal_frame(self, session_manager, temp_sessions_dir):
+        """save_frame should serialize and store a CausalFrame."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        session_manager.create_session("test-session", cwd="/tmp")
+
+        frame = CausalFrame(
+            frame_id="frame001",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="test query",
+            context_slice=ContextSlice(
+                files={}, memory_refs=[], tool_outputs={}, token_budget=1000
+            ),
+            evidence=[],
+            conclusion="done",
+            confidence=0.9,
+            invalidation_condition="never",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        frame_id = session_manager.save_frame(frame)
+        assert frame_id == "frame001"
+
+        # Verify frame is in session
+        frames = session_manager.get_session_frames()
+        assert len(frames) == 1
+        assert frames[0].frame_id == "frame001"
+
+    def test_frame_persistence_round_trip(self, session_manager, temp_sessions_dir):
+        """Frame should survive save/load cycle."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        # Create and save
+        session_manager.create_session("persist-test", cwd="/tmp")
+
+        frame = CausalFrame(
+            frame_id="persist001",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="persistence test",
+            context_slice=ContextSlice(
+                files={"/path/to/file.py": "abc123"},
+                memory_refs=["mem1"],
+                tool_outputs={"tool1": "output1"},
+                token_budget=2000,
+            ),
+            evidence=["evidence1"],
+            conclusion="persisted",
+            confidence=0.95,
+            invalidation_condition="file changes",
+            status=FrameStatus.VERIFIED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        session_manager.save_frame(frame)
+
+        # Load in new manager instance
+        manager2 = SessionManager(base_dir=temp_sessions_dir)
+        manager2.load_session("persist-test")
+
+        loaded = manager2.load_frame("persist001")
+        assert loaded is not None
+        assert loaded.frame_id == "persist001"
+        assert loaded.query == "persistence test"
+        assert loaded.status == FrameStatus.VERIFIED
+        assert loaded.context_slice.files == {"/path/to/file.py": "abc123"}
+
+    def test_save_frame_updates_parent_children(self, session_manager, temp_sessions_dir):
+        """Saving a child frame should update parent's children list."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        session_manager.create_session("parent-test", cwd="/tmp")
+
+        # Create parent frame
+        parent = CausalFrame(
+            frame_id="parent001",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="parent query",
+            context_slice=ContextSlice(
+                files={}, memory_refs=[], tool_outputs={}, token_budget=1000
+            ),
+            evidence=[],
+            conclusion="parent done",
+            confidence=0.9,
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+        session_manager.save_frame(parent)
+
+        # Create child frame
+        child = CausalFrame(
+            frame_id="child001",
+            depth=1,
+            parent_id="parent001",
+            children=[],
+            query="child query",
+            context_slice=ContextSlice(
+                files={}, memory_refs=[], tool_outputs={}, token_budget=1000
+            ),
+            evidence=["parent001"],
+            conclusion="child done",
+            confidence=0.8,
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+        session_manager.save_frame(child)
+
+        # Verify parent's children list was updated
+        updated_parent = session_manager.load_frame("parent001")
+        assert updated_parent is not None
+        assert "child001" in updated_parent.children
+

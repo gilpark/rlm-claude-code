@@ -14,7 +14,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .session_schema import (
     CellIndex,
@@ -26,6 +26,9 @@ from .session_schema import (
     SessionMetadata,
     SessionState,
 )
+
+if TYPE_CHECKING:
+    from .causal_frame import CausalFrame
 
 
 class SessionManager:
@@ -399,6 +402,112 @@ class SessionManager:
         if self._current_session:
             self._current_session.context.working_memory[key] = value
             self._current_session.metadata.updated_at = time.time()
+
+    # =========================================================================
+    # Causal Frame Storage Methods
+    # =========================================================================
+
+    def _get_frames_dir(self) -> Path | None:
+        """Get frames directory for current session."""
+        if not self._current_session_dir:
+            return None
+        frames_dir = self._current_session_dir / "frames"
+        frames_dir.mkdir(exist_ok=True)
+        return frames_dir
+
+    def _save_frame_to_disk(self, frame: "CausalFrame") -> None:
+        """Persist frame to disk."""
+        from .frame_serialization import serialize_frame
+
+        frames_dir = self._get_frames_dir()
+        if frames_dir:
+            frame_file = frames_dir / f"{frame.frame_id}.json"
+            frame_file.write_text(json.dumps(serialize_frame(frame), indent=2))
+
+    def save_frame(self, frame: "CausalFrame") -> str:
+        """
+        Save a CausalFrame to the current session.
+
+        Updates parent's children list if parent_id is set.
+
+        Args:
+            frame: CausalFrame to save
+
+        Returns:
+            frame_id of saved frame
+        """
+        if not self._current_session:
+            raise ValueError("No active session")
+
+        # Update parent's children list
+        if frame.parent_id:
+            parent = self.load_frame(frame.parent_id)
+            if parent and frame.frame_id not in parent.children:
+                parent.children.append(frame.frame_id)
+                self._save_frame_to_disk(parent)
+                # Update in-memory parent
+                for i, f in enumerate(self._current_session.context.causal_frames):
+                    if f.frame_id == frame.parent_id:
+                        self._current_session.context.causal_frames[i] = parent
+                        break
+
+        # Add to session's causal_frames list (or update existing)
+        existing_idx = None
+        for i, f in enumerate(self._current_session.context.causal_frames):
+            if f.frame_id == frame.frame_id:
+                existing_idx = i
+                break
+
+        if existing_idx is not None:
+            self._current_session.context.causal_frames[existing_idx] = frame
+        else:
+            self._current_session.context.causal_frames.append(frame)
+
+        # Persist to disk
+        self._save_frame_to_disk(frame)
+
+        return frame.frame_id
+
+    def load_frame(self, frame_id: str) -> "CausalFrame | None":
+        """
+        Load a CausalFrame by ID.
+
+        Args:
+            frame_id: Frame identifier
+
+        Returns:
+            CausalFrame or None if not found
+        """
+        from .frame_serialization import deserialize_frame
+
+        if not self._current_session:
+            return None
+
+        # Check in-memory first
+        for frame in self._current_session.context.causal_frames:
+            if frame.frame_id == frame_id:
+                return frame
+
+        # Try loading from disk
+        frames_dir = self._get_frames_dir()
+        if frames_dir:
+            frame_file = frames_dir / f"{frame_id}.json"
+            if frame_file.exists():
+                return deserialize_frame(json.loads(frame_file.read_text()))
+
+        return None
+
+    def get_session_frames(self) -> list["CausalFrame"]:
+        """
+        Get all CausalFrames for current session.
+
+        Returns:
+            List of CausalFrames
+        """
+        if not self._current_session:
+            return []
+
+        return list(self._current_session.context.causal_frames)
 
     def end_session(self) -> None:
         """Mark session as ended."""
