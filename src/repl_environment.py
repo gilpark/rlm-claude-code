@@ -212,6 +212,11 @@ class RLMEnvironment:
         self._tool_bridge: ToolBridge | None = None
         self._working_dir: Path | None = None
 
+        # Tracking for CausalFrame ContextSlice creation (SPEC-17)
+        self.files_read: dict[str, str] = {}  # path -> content_hash
+        self.tool_outputs_tracked: dict[str, str] = {}  # tool_name -> output
+        self.memory_refs: list[str] = []  # memory IDs accessed
+
     def _guarded_getitem(self, obj: Any, key: Any) -> Any:
         """
         Safe getitem guard for RestrictedPython.
@@ -2132,6 +2137,15 @@ class RLMEnvironment:
 
         if not result.success:
             raise FileNotFoundError(f"Failed to read {path}: {result.error}")
+
+        # Track file read for CausalFrame ContextSlice (SPEC-17)
+        content_hash = _hashlib.sha256(result.output.encode()).hexdigest()[:16]
+        # Resolve to absolute path for consistent tracking
+        if self._working_dir and not Path(path).is_absolute():
+            abs_path = str((self._working_dir / path).resolve())
+        else:
+            abs_path = str(Path(path).resolve())
+        self.files_read[abs_path] = content_hash
 
         # Cache in files dict for later access
         if path not in self.globals["files"]:

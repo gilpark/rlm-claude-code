@@ -1600,3 +1600,53 @@ class TestREPLHelpersBothModes:
         """List comprehension with dict access works in both modes."""
         result = env.execute("keys = [k for k in files.keys()]")
         assert result.success is True, f"Failed in restricted={use_restricted}: {result.error}"
+
+
+# CausalFrame Tracking Tests (SPEC-17)
+
+
+class TestCausalFrameTracking:
+    """Tests for CausalFrame context tracking in RLMEnvironment."""
+
+    @pytest.fixture
+    def basic_context(self):
+        """Create a basic context for testing."""
+        return SessionContext(
+            messages=[],
+            files={"test.py": "print('hello')"},
+            tool_outputs=[],
+            working_memory={},
+        )
+
+    def test_repl_has_tracking_fields(self, basic_context):
+        """RLMEnvironment should have tracking fields for ContextSlice creation."""
+        env = RLMEnvironment(basic_context)
+
+        # Check tracking fields exist
+        assert hasattr(env, "files_read")
+        assert hasattr(env, "tool_outputs_tracked")
+        assert hasattr(env, "memory_refs")
+        assert isinstance(env.files_read, dict)
+        assert isinstance(env.tool_outputs_tracked, dict)
+        assert isinstance(env.memory_refs, list)
+
+    def test_repl_tracks_file_reads(self, basic_context, tmp_path):
+        """RLMEnvironment should track which files were read via read_file()."""
+        import hashlib
+
+        # Create a test file
+        test_file = tmp_path / "test_track.py"
+        test_file.write_text("print('tracked')")
+
+        # Update context with the file
+        basic_context.files[str(test_file)] = "print('tracked')"
+
+        env = RLMEnvironment(basic_context)
+        env.enable_file_access(working_dir=tmp_path)
+
+        # Execute code that reads the file
+        result = env.execute(f"content = read_file('{test_file.name}')")
+        assert result.success is True
+
+        # Check tracking was populated
+        assert len(env.files_read) >= 1
