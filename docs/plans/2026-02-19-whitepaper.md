@@ -173,6 +173,60 @@ The user speaks contextually. The AI understands immediately. Related work updat
 
 ---
 
+## Living Documentation: A Concrete Application
+
+The clearest demonstration of what causal externalization makes possible is living documentation in a CI/CD pipeline.
+
+Current attempts at automated documentation follow a naive pattern:
+
+```
+git diff → LLM → "update the docs to reflect this change" → overwrite
+```
+
+This fails for three reasons. The system does not know why the documentation was written the way it was. It cannot identify which parts of the documentation are actually affected by the change. And regenerating from scratch destroys the intent encoded in the original writing.
+
+With causal externalization, the flow is different:
+
+```
+git push
+    ↓
+compare file hashes vs prior SessionArtifacts
+    ↓
+auth.py changed → find frames where auth.py ∈ context_slice
+    ↓
+invalidate: frame_auth_doc, frame_api_reference (depends on frame_auth_doc)
+    ↓
+for each invalidated frame:
+    re-run original query with new context
+    → new conclusion
+    → cascade to dependent frames
+    ↓
+write only the affected sections
+```
+
+The rest of the documentation is untouched — because the system knows it was not affected.
+
+More importantly: each CausalFrame carries the original query that produced its documentation section. That query encodes intent:
+
+```python
+CausalFrame(
+    query="auth 모듈 문서를 개발자 온보딩 기준으로 써줘",
+    conclusion="JWT expiry는 24시간, refresh는 7일...",
+    invalidation_condition="auth.py의 TOKEN_EXPIRY 상수 변경",
+    status=FrameStatus.PROMOTED
+)
+```
+
+When `auth.py` changes and the frame is invalidated, the system re-runs the same query — "개발자 온보딩 기준으로." The intent is preserved across the change. The code is different. The documentation purpose is not.
+
+This also surfaces a meaningful edge case. When a change is large enough that the documentation's purpose itself should change — not just its content — the re-run will produce a conclusion with low confidence. The system escalates rather than silently overwrites: "이 변경은 단순 업데이트가 아닐 수 있어요. 문서 구조를 재검토해야 할 수 있습니다."
+
+This is the boundary between automation and human judgment. The system handles mechanical updates automatically. It surfaces structural decisions to the human.
+
+The broader point: living documentation is not a feature. It is a consequence of storing causality. A system that knows why a document was written, and what code it was derived from, can maintain that document as the code changes — not by regenerating everything, but by invalidating exactly what changed and preserving exactly what did not.
+
+---
+
 ## Scale and Simplicity
 
 A temptation when designing this system is to reach for complexity: DAG structures, vector databases, ML routing.
