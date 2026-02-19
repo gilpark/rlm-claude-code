@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from src.orchestration_schema import ToolAccessLevel
 from src.tool_bridge import (
+    ToolAccessLevel,
     ToolBridge,
     ToolPermissions,
     ToolResult,

@@ -12,10 +12,18 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from .orchestration_schema import ToolAccessLevel
+
+class ToolAccessLevel(Enum):
+    """Tool access levels for sub-LLMs."""
+
+    NONE = "none"              # Pure reasoning only, no tool access
+    REPL_ONLY = "repl_only"    # Only Python REPL execution
+    READ_ONLY = "read_only"    # REPL + read file/search tools
+    FULL = "full"              # Full Claude Code tool access
 
 
 @dataclass
@@ -459,6 +467,7 @@ def create_tool_bridge(access_level: ToolAccessLevel) -> ToolBridge:
 
 
 __all__ = [
+    "ToolAccessLevel",
     "ToolBridge",
     "ToolPermissions",
     "ToolResult",
