@@ -1,359 +1,546 @@
-# RLM RLAPH Refactoring Plan
+# Refactoring Plan: RLM-Claude-Code v2
+
+*Generated: 2026-02-19*
+
+---
 
 ## Executive Summary
 
-Refactor the RLM orchestrator from a deferred-operation pattern to a clean **RLAPH-style loop** (Recursive Language Agent with Python Handler). This keeps the REPL (core RLM feature) while fixing the confusing multi-turn flow.
+The v2 design is **dramatically simpler**: REPL environment + CausalFrame persistence. The current codebase has ~90 files; the target is **12 src files**.
+
+**Key insight:** Remove all orchestrators, routers, classifiers, vector search, async stacks, and complex telemetry. Focus on LM-driven navigation and frame-based persistence.
+
+| Metric | Count |
+|--------|-------|
+| Files to keep | 15 |
+| Files to refactor | 7 |
+| Files to remove | ~82 |
+| Files to create | 5 |
 
 ---
 
-## Current Issues
+## Part 1: Files to KEEP (15)
 
-### Issue 1: Deferred Operation Confusion
+These files align with the v2 design and need minimal changes:
 
-**Problem**: `llm()` returns a `DeferredOperation` object instead of the actual result.
+```
+src/
+├── __init__.py           # Package init
+├── config.py             # Configuration
+├── prompts.py            # Prompt templates
+├── types.py              # Type definitions
+├── repl_plugin.py        # REPL plugin integration
+├── rlaph_loop.py         # Immediate execution loop ✓
+├── repl_environment.py   # peek, search, llm, llm_batch ✓
+├── tool_bridge.py        # Controlled tool access ✓
+├── causal_frame.py       # CausalFrame, FrameStatus ✓
+├── context_slice.py      # ContextSlice, hash, budget ✓
+├── frame_index.py        # dict[str, CausalFrame] ✓
+├── frame_invalidation.py # propagate_invalidation ✓
+├── session_artifacts.py  # SessionArtifacts, FileRecord ✓
+├── session_comparison.py # compare_sessions, SessionDiff ✓
+└── plugin_interface.py   # CoreContext, RLMPlugin protocol ✓
+```
 
+---
+
+## Part 2: Files to REFACTOR (7)
+
+These files exist but need updates to match the design spec:
+
+### src/causal_frame.py
+- **Reason:** Core data structure - must match design spec exactly
+- **Changes:**
+  - Verify CausalFrame has: `frame_id`, `depth`, `parent_id`, `children`
+  - Add: `query`, `context_slice`, `evidence`, `conclusion`, `confidence`
+  - Add: `invalidation_condition`, `status`, `branched_from`
+  - Add: `created_at`, `completed_at`
+
+### src/frame_index.py
+- **Reason:** Should be simple in-memory index, not vector search
+- **Changes:**
+  - Implement flat dict scan of 10-20 frames
+  - Remove any embedding/vector logic
+  - Add branch queries: `active`, `suspended`, `pivots`
+
+### src/frame_invalidation.py
+- **Reason:** Core invalidation logic for file change detection
+- **Changes:**
+  - Implement cascade invalidation (children + sideways evidence)
+  - Keep O(n) at n=10-20
+
+### src/context_slice.py
+- **Reason:** LM decides context, not core enforcement
+- **Changes:**
+  - Structure: `files`, `memory_refs`, `tool_outputs`, `token_budget`
+  - Core enforces `token_budget`; LM decides what files to include
+
+### src/session_artifacts.py
+- **Reason:** Session artifact management
+- **Changes:**
+  - Structure: `session_id`, `initial_prompt`, `files`, `root_frame_id`, `conversation_log`
+  - FileRecord: `path`, `hash`, `role`
+
+### src/session_comparison.py
+- **Reason:** Session comparison utility
+- **Changes:**
+  - Implement `compare_sessions(current, prior, index)`
+  - Output: same task?, changed files → invalidated frames, suspended branches
+
+### src/plugin_interface.py
+- **Reason:** Plugin system interface
+- **Changes:**
+  - Simplify to: `transform_input`, `parse_output`, `store`
+  - CoreContext: `current_frame`, `index`, `artifacts`, `changed_files`, `invalidated_frames`, `suspended_frames`
+
+---
+
+## Part 3: Files to REMOVE (~82)
+
+### Category: Deferred/Async LLM Stack (REJECTED by design)
+
+```
+src/api_client.py
+src/async_executor.py
+src/async_handler.py
+src/recursive_handler.py
+```
+
+**Reason:** Design mandates immediate execution. Deferred/async makes frame lifecycle ambiguous.
+
+### Category: DAG Structure (REJECTED - n=10-20, O(n) scan is correct)
+
+```
+src/cell_manager.py
+src/circuit_breaker.py
+src/compute_allocation.py
+src/frame_lifecycle.py
+src/frame_serialization.py
+src/proactive_computation.py
+```
+
+**Reason:** At 10-20 frames, linear scan is instant. DAG adds complexity without benefit.
+
+### Category: Complexity Classifier/Routing (REJECTED - LM navigates in REPL)
+
+```
+src/complexity_classifier.py
+src/intelligent_orchestrator.py
+src/lats_orchestration.py
+src/learned_routing.py
+src/router_integration.py
+src/setfit_classifier.py
+src/smart_router.py
+```
+
+**Reason:** The model navigates in REPL. No routing needed.
+
+### Category: Vector/Embedding Search (REJECTED - 10-20 frames, flat scan is instant)
+
+```
+src/context_index.py
+src/embedding_retrieval.py
+```
+
+**Reason:** Vector search is overkill at this scale.
+
+### Category: Facts/Experiences Store (REJECTED - PROMOTED CausalFrame is the fact)
+
+```
+src/cross_session_promotion.py
+src/memory_evolution.py
+src/memory_store.py
+```
+
+**Reason:** A PROMOTED frame IS the fact. No separate store needed.
+
+### Category: SQLite/MemoryBackend Abstraction (REJECTED - JSONL per session)
+
+```
+src/memory_backend.py
+```
+
+**Reason:** JSONL per session requires zero dependencies and is human-readable.
+
+### Category: Trajectory/Event Log (REJECTED - FrameStore is clearer)
+
+```
+src/trajectory.py
+src/trajectory_analysis.py
+src/progressive_trajectory.py
+```
+
+**Reason:** FrameStore provides cleaner persistence.
+
+### Category: SessionLink (REJECTED - undefined concept)
+
+```
+src/session_manager.py
+src/session_schema.py
+```
+
+**Reason:** Concept removed from v2 design.
+
+### Category: Core-Enforced Logic (REJECTED - LM decides)
+
+```
+src/confidence_synthesis.py      # Majority voting
+src/context_compression.py       # Context slicing
+src/context_enrichment.py        # Context slicing
+src/execution_guarantees.py      # Guarantees
+```
+
+**Reason:** Structural constraints → Core. Judgment calls → LM.
+
+### Category: Orchestrator Components (REJECTED - not in v2 design)
+
+```
+src/local_orchestrator.py
+src/orchestration_logger.py
+src/orchestration_schema.py
+src/orchestration_telemetry.py
+src/orchestrator/               # entire directory
+```
+
+**Reason:** v2 uses immediate RLAPH loop, not complex orchestration.
+
+### Category: Epistemic Verification (REJECTED - not in v2 design)
+
+```
+src/epistemic/                  # entire directory
+```
+
+**Reason:** Simplified for v2.
+
+### Category: Complex Plugin System (REJECTED - simplify to basic hooks)
+
+```
+src/plugin_registry.py
+src/plugins/                    # entire directory
+```
+
+**Reason:** Basic hooks are sufficient.
+
+### Category: Not in Target File List
+
+```
+src/auto_activation.py
+src/cache.py
+src/context_manager.py
+src/continuous_learning.py
+src/cost_tracker.py
+src/enhanced_budget.py
+src/formal_verification.py
+src/gliner_extractor.py
+src/learning.py
+src/progress.py
+src/prompt_caching.py
+src/prompt_optimizer.py
+src/reasoning_traces.py
+src/response_parser.py
+src/rich_output.py
+src/smart_pipeline.py
+src/state_persistence.py
+src/strategy_cache.py
+src/tokenization.py
+src/transcript_parser.py
+src/tree_of_thoughts.py
+src/user_corrections.py
+src/user_preferences.py
+src/visualization.py
+```
+
+**Reason:** Not required for v2 core functionality.
+
+---
+
+## Part 4: Files to CREATE (5)
+
+### src/llm_client.py
 ```python
-# Current behavior (confusing)
-result = llm("What is 2+2?")
-print(result)  # Prints: "<<DEFERRED:rq_1>>"
-
-# User must then:
-# 1. Wait for orchestrator to process
-# 2. Check working_memory['rq_1'] in a separate code block
-# 3. Hope the result is there
+class LLMClient:
+    def call(
+        self,
+        query: str,
+        context: dict,
+        model: str | None = None   # None = use default for this depth
+    ) -> str: ...
 ```
+- Provider-agnostic LLM calls
+- Default model cascade: root uses larger model, sub-calls use smaller
 
-**Impact**:
-- LLM gets confused by `<<DEFERRED:rq_1>>` output
-- Multi-turn flow is hard to debug
-- LLM often hallucinates results instead of waiting
-
-### Issue 2: Missing Trajectory Methods
-
-**Problem**: `StreamingTrajectory` class is missing methods called by `recursive_handler.py`:
-
-| Missing Method | Called From |
-|----------------|-------------|
-| `emit_recursive_start` | `recursive_handler.py:190` |
-| `emit_recursive_error` | `recursive_handler.py:221` |
-| `emit_model_downgrade` | `recursive_handler.py:167` |
-
-**Impact**: Recursive LLM calls fail silently or with errors.
-
-### Issue 3: Complex Async Flow
-
-**Problem**: The deferred operation processing requires complex async coordination:
-
-```
-REPL executes → DeferredOperation created → Code finishes →
-Orchestrator detects pending ops → Processes async →
-Stores in working_memory → Next REPL block can access
-```
-
-**Impact**: Hard to debug, easy to break, requires multiple code blocks.
-
-### Issue 4: Context Bloat
-
-**Problem**: Full REPL outputs are added to root LM context without truncation.
-
-**Fixed**: Added `MAX_REPL_OUTPUT = 1500` truncation (lines 414-420 in core.py).
-
-### Issue 5: LLM Response Truncation
-
-**Problem**: `max_tokens=4096` was too small for detailed analysis.
-
-**Fixed**: Increased to `max_tokens=16384` in orchestrator files.
-
----
-
-## Goals
-
-### Primary Goal
-Make `llm()` return the **actual result** synchronously, keeping the REPL sandbox.
-
-### Success Criteria
-
-1. **Simple API**: `result = llm("query")` returns string immediately
-2. **Depth works**: Recursive calls to depth 2-3 work correctly
-3. **REPL preserved**: `peek()`, `search()`, `working_memory` still work
-4. **Easy debugging**: Single loop, clear iteration history
-5. **Clean code**: Remove ~500 lines of deferred operation handling
-
----
-
-## Architecture Comparison
-
-### Before (Deferred Operations)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ORCHESTRATOR LOOP                        │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────┐  │
-│  │ LLM call │───►│ Parse        │───►│ REPL execute     │  │
-│  └──────────┘    └──────────────┘    └──────────────────┘  │
-│                                              │              │
-│                                              ▼              │
-│                                    ┌──────────────────┐    │
-│                                    │ llm() creates    │    │
-│                                    │ DeferredOp       │    │
-│                                    └──────────────────┘    │
-│                                              │              │
-│                                              ▼              │
-│         ┌────────────────────────────────────────────┐      │
-│         │ NEXT ITERATION                             │      │
-│         │ Process deferred ops async                 │      │
-│         │ Store in working_memory[op_id]             │      │
-│         │ LLM must check working_memory              │      │
-│         └────────────────────────────────────────────┘      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### After (RLAPH Loop)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    RLAPH LOOP (Clean)                       │
-│                                                             │
-│  for iteration in range(max_iterations):                   │
-│      ┌──────────┐    ┌──────────────┐    ┌──────────────┐  │
-│      │ LLM call │───►│ Parse        │───►│ Execute      │  │
-│      └──────────┘    └──────────────┘    └──────────────┘  │
-│           ▲                                    │            │
-│           │                                    ▼            │
-│           │                          ┌──────────────────┐  │
-│           │                          │ llm() is SYNC    │  │
-│           │                          │ Returns result   │  │
-│           │                          │ immediately      │  │
-│           │                          └──────────────────┘  │
-│           │                                    │            │
-│           └────────────────────────────────────┘            │
-│                     (feed result back)                      │
-│                                                             │
-│  If FINAL: return answer                                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Implementation Plan
-
-### Phase 1: Create RLAPH Loop Core
-
-**File**: `src/rlaph_loop.py` (NEW)
-
+### src/frame_store.py
 ```python
-class RLAPHLoop:
-    """Clean RLM agent loop with synchronous LLM calls."""
+class FrameStore:
+    path: Path  # ~/.claude/rlm-frames/{root_session_id}.jsonl
 
-    def __init__(self, max_iterations=20, max_depth=3):
-        self.max_iterations = max_iterations
-        self.max_depth = max_depth
-        self.repl: RLMEnvironment = None
-        self.history: list[dict] = []
-        self.depth = 0
+    def save(frame: CausalFrame) -> None         # json.dumps + append
+    def load(frame_id: str) -> CausalFrame       # readlines + match
+    def list() -> list[CausalFrame]              # readlines + parse
+    def find_by_status(status) -> list           # list + filter
+```
+- JSONL per session
+- Zero dependencies
+- Human-readable
 
-    async def run(self, query: str, context: SessionContext) -> str:
-        """Main loop - clean, predictable, debuggable."""
-        ...
+### scripts/extract_frames.py
+- Hook: Stop
+- Extract frame tree from session
+- Save to FrameStore
 
-    def llm_sync(self, query: str, context: str = "") -> str:
-        """Synchronous LLM call - returns actual result."""
-        ...
+### scripts/compare_sessions.py
+- Hook: SessionStart
+- Compare current vs prior session
+- Surface: changed files → invalidated frames → suspended branches
+
+### hooks/hooks.json
+```json
+{
+  "SessionStart": "...",
+  "PostToolUse": "...",
+  "Stop": "..."
+}
+```
+- Where REPL and Causal Layer connect
+
+---
+
+## Part 5: Target Architecture
+
+```
+src/
+├── rlaph_loop.py            # immediate execution loop
+├── repl_environment.py      # peek, search, llm, llm_batch, map_reduce
+├── llm_client.py            # provider-agnostic LLM calls
+├── tool_bridge.py           # controlled tool access
+├── causal_frame.py          # CausalFrame, FrameStatus, compute_frame_id
+├── context_slice.py         # ContextSlice, hash, budget
+├── frame_index.py           # dict[str, CausalFrame], branch queries
+├── frame_invalidation.py    # propagate_invalidation
+├── frame_store.py           # JSONL: save, load, list, find_by_status
+├── session_artifacts.py     # SessionArtifacts, FileRecord
+├── session_comparison.py    # compare_sessions, SessionDiff
+└── plugin_interface.py      # CoreContext, RLMPlugin protocol
+
+scripts/
+├── extract_frames.py        # Stop hook: extract + save
+└── compare_sessions.py      # SessionStart hook: diff + surface
+
+hooks/
+└── hooks.json               # SessionStart, PostToolUse, Stop
 ```
 
-**Estimated lines**: ~150
+**12 src files. 2 scripts. 1 hooks file.**
 
-### Phase 2: Modify REPL Environment
+---
 
-**File**: `src/repl_environment.py`
+## Execution Order
 
-**Change**: Make `_recursive_query` return actual result instead of `DeferredOperation`.
+### Phase 1: Create Missing Core Files
+1. `src/llm_client.py` - Simple synchronous client
+2. `src/frame_store.py` - JSONL persistence
 
-```python
-# Before
-def _recursive_query(self, query: str, context: Any = None) -> DeferredOperation:
-    op = DeferredOperation(...)
-    self.pending_operations.append(op)
-    return op
+### Phase 2: Refactor Existing Core Files
+1. `src/causal_frame.py` - Match design spec exactly
+2. `src/frame_index.py` - Remove vector logic, add branch queries
+3. `src/context_slice.py` - Simplify structure
+4. `src/frame_invalidation.py` - Implement cascade
+5. `src/session_artifacts.py` - Match design spec
+6. `src/session_comparison.py` - Implement diff logic
+7. `src/plugin_interface.py` - Simplify to hooks
 
-# After
-def _recursive_query(self, query: str, context: Any = None) -> str:
-    """Returns actual result synchronously."""
-    if self.recursive_handler:
-        return self.recursive_handler.llm_sync(query, str(context) if context else "")
-    raise RuntimeError("No recursive handler available")
+### Phase 3: Create Hooks
+1. `hooks/hooks.json` - Configure hooks
+2. `scripts/extract_frames.py` - Stop hook
+3. `scripts/compare_sessions.py` - SessionStart hook
+
+### Phase 4: Remove Obsolete Files
+- Delete all files in Part 3
+- Update imports in remaining files
+- Verify no broken dependencies
+
+### Phase 5: Integration Testing
+- Verify REPL functions work
+- Verify frame creation/persistence
+- Verify invalidation cascade
+- Verify session comparison
+
+---
+
+## Notes
+
+- **Scale:** 10-20 frames at depth 2-3. Linear scan is instant.
+- **Principle:** Externalize what the model cannot hold, let it navigate actively.
+- **Core vs LM:** Core enforces structure (budget, depth). LM decides content and policy.
+
+---
+
+## Part 6: Feasibility Analysis
+
+### Overall Assessment
+
+| Metric | Value |
+|--------|-------|
+| **Overall Feasibility** | HIGH |
+| **Critical Blockers** | None identified |
+| **Risk Level** | Low-Medium |
+
+### Section-by-Section Analysis
+
+#### Part 1: Files to KEEP
+- **Feasibility:** HIGH
+- **Effort:** LOW
+- **Strategy:** These 15 files already align with v2 design. Minimal changes needed - mostly imports and minor API adjustments.
+- **Risks:**
+  - Some files may have hidden dependencies on removed modules
+  - Import statements may need updating after deletions
+
+#### Part 2: Files to REFACTOR
+- **Feasibility:** HIGH
+- **Effort:** MEDIUM
+
+| File | Current State | Gaps | Strategy |
+|------|---------------|------|----------|
+| `causal_frame.py` | Has CausalFrame with parent_id, frame_id, status, content, metadata, children, timestamp | May need to remove complex metadata; ensure FrameStatus matches simplified spec | Simplify to core fields, remove vector embeddings |
+| `frame_index.py` | Has FrameIndex class managing storage | May use vector search or complex indexing | Refactor to simple dict[str, CausalFrame] |
+| `frame_invalidation.py` | Has propagate_invalidation function | Logic may be tied to old frame structure | Verify works with simplified CausalFrame |
+| `context_slice.py` | Has ContextSlice with hash, budget | Budget calculation may need adjustment | Ensure matches v2 spec: hash_id, content, budget |
+| `session_artifacts.py` | Has SessionArtifacts, FileRecord | May need new artifact storage model | Update to v2 artifact spec |
+| `session_comparison.py` | Has compare_sessions, SessionDiff | Comparison logic may need adjustment | Verify works with simplified CausalFrame |
+| `plugin_interface.py` | Defines CoreContext, RLMPlugin | Protocol may need v2 API updates | Review and update definitions |
+
+#### Part 3: Files to REMOVE
+- **Feasibility:** HIGH
+- **Effort:** MEDIUM
+- **Strategy:** Delete in phases:
+  1. Remove orchestrators, routers, classifiers first
+  2. Remove vector search and telemetry
+  3. Remove async stack remnants
+  4. Clean up test files for removed modules
+- **Risks:**
+  - Hidden dependencies may cause import errors
+  - Some 'removed' files may actually be needed
+  - Test files may reference deleted modules
+
+#### Part 4: Files to CREATE
+- **Feasibility:** HIGH
+- **Effort:** MEDIUM
+
+| File | Strategy |
+|------|----------|
+| `llm_client.py` | Simple synchronous client for REPL |
+| `frame_store.py` | Implement JSONL frame persistence |
+| `extract_frames.py` | Hook script for frame extraction |
+| `compare_sessions.py` | Hook script for session diff |
+| `hooks.json` | Hook configuration |
+
+---
+
+## Part 7: Critical Path & Recommended Sequence
+
+### Critical Path (in order)
+1. Create `llm_client.py` - simple synchronous client
+2. Refactor `causal_frame.py` - simplified structure
+3. Refactor `frame_index.py` - dict-based storage
+4. Create `frame_store.py` - frame serialization
+5. Refactor `context_slice.py` - match v2 spec
+6. Update `rlaph_loop.py` - use new components
+7. Remove old orchestrator and router files
+8. Clean up imports and run tests
+
+### Revised Execution Sequence
+
+**Phase 1: Foundation (Low Risk)**
+1. Create `src/llm_client.py`
+2. Create `src/frame_store.py`
+3. Update `src/types.py` if needed
+
+**Phase 2: Core Refactor (Medium Risk)**
+1. Refactor `src/causal_frame.py` to simplified structure
+2. Refactor `src/frame_index.py` to dict-based storage
+3. Refactor `src/context_slice.py` to match v2 spec
+4. Update `src/frame_invalidation.py` for new frame structure
+
+**Phase 3: Integration (Medium Risk)**
+1. Refactor `src/session_artifacts.py`
+2. Refactor `src/session_comparison.py`
+3. Refactor `src/plugin_interface.py`
+4. Update `src/rlaph_loop.py` to use new components
+5. Update `src/repl_environment.py` if needed
+
+**Phase 4: Hooks (Low Risk)**
+1. Create `hooks/hooks.json`
+2. Create `scripts/extract_frames.py`
+3. Create `scripts/compare_sessions.py`
+
+**Phase 5: Cleanup (Medium Risk)**
+1. Remove files in batches:
+   - Batch A: Orchestrators (`src/orchestrator/`, `src/local_orchestrator.py`, etc.)
+   - Batch B: Routers (`src/smart_router.py`, `src/complexity_classifier.py`, etc.)
+   - Batch C: Vector search (`src/embedding_retrieval.py`, `src/context_index.py`)
+   - Batch D: Async stack (`src/async_*.py`, `src/recursive_handler.py`)
+   - Batch E: Telemetry (`src/orchestration_telemetry.py`, etc.)
+   - Batch F: Memory stores (`src/memory_*.py`)
+   - Batch G: Epistemic (`src/epistemic/`)
+   - Batch H: Remaining unused files
+2. Fix broken imports after each batch
+3. Run tests after each batch
+
+**Phase 6: Verification**
+1. Run all tests
+2. Verify REPL functions work
+3. Verify frame creation/persistence
+4. Verify invalidation cascade
+5. Verify session comparison
+
+---
+
+## Raw Feasibility JSON
+
+```json
+{
+  "sections": {
+    "keep": {
+      "feasibility": "high",
+      "strategy": "These 15 files already align with v2 design. Minimal changes needed.",
+      "risks": ["Hidden dependencies on removed modules", "Import statements may need updating"],
+      "effort": "low"
+    },
+    "refactor": {
+      "feasibility": "high",
+      "strategy": "The 7 files are already well-structured. Main work is simplification.",
+      "effort": "medium"
+    },
+    "remove": {
+      "feasibility": "high",
+      "strategy": "Delete in phases with testing between batches.",
+      "risks": ["Hidden dependencies", "Some files may be needed", "Test references"],
+      "effort": "medium"
+    },
+    "create": {
+      "feasibility": "high",
+      "strategy": "Create foundation files first, then hooks.",
+      "effort": "medium"
+    }
+  },
+  "overall": {
+    "feasibility": "high",
+    "critical_path": ["causal_frame.py", "frame_index.py", "frame_store.py", "rlaph_loop.py"],
+    "blockers": ["None identified"],
+    "recommended_sequence": [
+      "Start with low-risk file creation",
+      "Refactor core data structures",
+      "Build new functionality",
+      "Update integration points",
+      "Remove deprecated files incrementally",
+      "Final testing and cleanup"
+    ]
+  }
+}
 ```
 
-**Files to modify**:
-- `src/repl_environment.py` (~20 lines changed)
-- Remove `DeferredOperation` creation for `llm()`
-
-### Phase 3: Simplify Orchestrator
-
-**Files**: `src/orchestrator/core.py`, `src/orchestrator.py`
-
-**Changes**:
-1. Remove `_process_deferred_operations` method (~80 lines)
-2. Remove `has_pending_operations()` checks
-3. Remove `resolve_operation()` calls
-4. Simplify REPL result handling
-
-**Estimated removal**: ~200 lines
-
-### Phase 4: Fix Trajectory Methods
-
-**File**: `src/trajectory.py`
-
-**Already fixed**:
-- `emit_recursive_start` (added)
-- `emit_model_downgrade` (added)
-
-**Still needed**:
-- `emit_recursive_error` (add method)
-- Review all `emit_*` calls in `recursive_handler.py`
-
-### Phase 5: Update Entry Points
-
-**File**: `scripts/run_orchestrator.py`
-
-**Change**: Use `RLAPHLoop` instead of `RLMOrchestrator`.
-
-```python
-# Before
-from src.orchestrator import RLMOrchestrator
-orchestrator = RLMOrchestrator(config=config)
-async for event in orchestrator.run(query, context):
-    ...
-
-# After
-from src.rlaph_loop import RLAPHLoop
-loop = RLAPHLoop(max_depth=depth)
-result = await loop.run(query, context)
-print(result)
-```
-
 ---
 
-## File Changes Summary
-
-| File | Action | Lines Changed |
-|------|--------|---------------|
-| `src/rlaph_loop.py` | CREATE | +150 |
-| `src/repl_environment.py` | MODIFY | ~30 |
-| `src/orchestrator/core.py` | MODIFY | -100 |
-| `src/orchestrator.py` | MODIFY | -100 |
-| `src/trajectory.py` | MODIFY | +20 |
-| `scripts/run_orchestrator.py` | MODIFY | ~20 |
-
-**Net change**: ~0 lines (simpler but new file)
-
----
-
-## Migration Path
-
-### Step 1: Create RLAPH Loop (Non-Breaking)
-- Create `src/rlaph_loop.py`
-- Keep existing orchestrator working
-- Test with `--rlaph` flag
-
-### Step 2: Add Sync LLM to REPL (Non-Breaking)
-- Add `llm_sync()` to recursive handler
-- Keep `DeferredOperation` path working
-- Test both paths
-
-### Step 3: Switch Default (Breaking)
-- Make `llm()` use sync path by default
-- Remove deferred operation processing
-- Update tests
-
-### Step 4: Cleanup
-- Remove unused deferred operation code
-- Simplify orchestrator
-- Update documentation
-
----
-
-## Testing Plan
-
-### Unit Tests
-
-```python
-# tests/unit/test_rlaph_loop.py
-
-def test_llm_returns_string():
-    """llm() should return actual string, not DeferredOperation."""
-    loop = RLAPHLoop()
-    result = loop.llm_sync("What is 2+2?")
-    assert isinstance(result, str)
-    assert "4" in result
-
-def test_depth_limit():
-    """Should enforce max_depth."""
-    loop = RLAPHLoop(max_depth=2)
-    # At depth 2, should raise RecursionDepthError
-    ...
-
-def test_final_answer():
-    """Should return when FINAL: is detected."""
-    loop = RLAPHLoop()
-    result = await loop.run("What is 2+2? Use FINAL:")
-    assert result == "4"
-```
-
-### Integration Tests
-
-```bash
-# Test depth 2
-uv run python scripts/run_orchestrator.py --depth 2 "Use llm() to ask what 3+3 is"
-
-# Test depth 3
-uv run python scripts/run_orchestrator.py --depth 3 "Complex analysis requiring recursion"
-
-# Test REPL functions still work
-uv run python scripts/run_orchestrator.py "Use peek() and search() to analyze files"
-```
-
----
-
-## Risks and Mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Breaking existing behavior | Keep old path with `--legacy` flag |
-| Sync calls block event loop | Use `asyncio.run_in_executor` for blocking |
-| Depth explosion | Hard limit on max_depth (default 3) |
-| API rate limits | Add delays between recursive calls |
-
----
-
-## Timeline
-
-| Phase | Description | Effort |
-|-------|-------------|--------|
-| 1 | Create RLAPH loop | 2 hours |
-| 2 | Modify REPL | 1 hour |
-| 3 | Simplify orchestrator | 2 hours |
-| 4 | Fix trajectory | 30 min |
-| 5 | Update entry points | 30 min |
-| 6 | Testing | 2 hours |
-
-**Total**: ~8 hours
-
----
-
-## Success Metrics
-
-1. `llm("query")` returns string immediately
-2. Depth 2-3 tests pass
-3. No `DeferredOperation` in user-visible code
-4. 200+ lines removed from orchestrator
-5. All existing tests pass
-
----
-
-## References
-
-- RLM Paper: https://arxiv.org/abs/2512.24601v1
-- RLAPH Concept: Recursive Language Agent with Python Handler
-- Claude Code Hooks: https://docs.anthropic.com/en/docs/claude-code/hooks
-- Claude Code Subagents: https://docs.anthropic.com/en/docs/claude-code/subagents
+*Based on: Zhang et al., "Recursive Language Models" (2025)*
+*Design doc: docs/plans/2026-02-19-design.md*
+*Whitepaper: docs/plans/2026-02-19-whitepaper.md*
