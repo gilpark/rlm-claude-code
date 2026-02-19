@@ -2186,6 +2186,84 @@ class MemoryStore:
             tier="task",  # Micro mode facts start at task tier
         )
 
+    # =========================================================================
+    # CausalFrame Storage (SPEC-17)
+    # =========================================================================
+
+    def _get_frames_dir(self) -> Path:
+        """Get frames directory for CausalFrame storage."""
+        frames_dir = Path(self.db_path).parent / "frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        return frames_dir
+
+    def store_frame(self, frame: Any) -> str:
+        """
+        Store a CausalFrame for long-term memory.
+
+        Implements: SPEC-17
+
+        Args:
+            frame: CausalFrame to store
+
+        Returns:
+            frame_id
+        """
+        from .frame_serialization import serialize_frame
+
+        frames_dir = self._get_frames_dir()
+        frame_file = frames_dir / f"{frame.frame_id}.json"
+        frame_file.write_text(json.dumps(serialize_frame(frame), indent=2))
+
+        return frame.frame_id
+
+    def retrieve_frame(self, frame_id: str) -> Any:
+        """
+        Retrieve a CausalFrame by ID.
+
+        Implements: SPEC-17
+
+        Args:
+            frame_id: Frame identifier
+
+        Returns:
+            CausalFrame or None
+        """
+        from .frame_serialization import deserialize_frame
+
+        frame_file = self._get_frames_dir() / f"{frame_id}.json"
+        if frame_file.exists():
+            return deserialize_frame(json.loads(frame_file.read_text()))
+        return None
+
+    def list_frames(self, session_id: str | None = None) -> list[Any]:
+        """
+        List all stored frames, optionally filtered by session.
+
+        Implements: SPEC-17
+
+        Args:
+            session_id: Optional session filter (for future use)
+
+        Returns:
+            List of CausalFrames
+        """
+        from .frame_serialization import deserialize_frame
+
+        frames_dir = self._get_frames_dir()
+        if not frames_dir.exists():
+            return []
+
+        frames = []
+        for frame_file in frames_dir.glob("*.json"):
+            try:
+                frame = deserialize_frame(json.loads(frame_file.read_text()))
+                # TODO: Filter by session_id when frame metadata includes it
+                frames.append(frame)
+            except Exception:
+                continue  # Skip corrupted frames
+
+        return frames
+
 
 def create_micro_memory_loader(
     store: MemoryStore,

@@ -2022,3 +2022,184 @@ class TestCreateMicroMemoryLoader:
         # Calling loader should call retrieve
         loader()
         assert call_count[0] == 1
+
+
+# =============================================================================
+# SPEC-17: CausalFrame Storage Tests
+# =============================================================================
+
+
+class TestMemoryStoreFrameStorage:
+    """Tests for CausalFrame storage in MemoryStore (SPEC-17)."""
+
+    @pytest.fixture
+    def temp_frames_dir(self):
+        """Create temporary directory for frame storage."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+            yield str(db_path)
+
+    @pytest.fixture
+    def store_with_frames(self, temp_frames_dir):
+        """Create MemoryStore with temp frames directory."""
+        from src.memory_store import MemoryStore
+
+        return MemoryStore(db_path=temp_frames_dir)
+
+    def test_store_frame_in_memory_store(self, store_with_frames):
+        """store_frame should persist CausalFrame to disk."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        frame = CausalFrame(
+            frame_id="test-frame-1",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="test query",
+            context_slice=ContextSlice(
+                files={"test.py": "print('hello')"},
+                memory_refs=[],
+                tool_outputs={},
+                token_budget=1000,
+            ),
+            evidence=[],
+            conclusion="test conclusion",
+            confidence=0.9,
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        result_id = store_with_frames.store_frame(frame)
+        assert result_id == "test-frame-1"
+
+    def test_retrieve_frame_returns_stored_frame(self, store_with_frames):
+        """retrieve_frame should return previously stored frame."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        frame = CausalFrame(
+            frame_id="test-frame-2",
+            depth=1,
+            parent_id="parent-frame",
+            children=[],
+            query="sub query",
+            context_slice=ContextSlice(
+                files={},
+                memory_refs=[],
+                tool_outputs={"bash": "output"},
+                token_budget=500,
+            ),
+            evidence=["evidence-1"],
+            conclusion="sub conclusion",
+            confidence=0.8,
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        store_with_frames.store_frame(frame)
+        retrieved = store_with_frames.retrieve_frame("test-frame-2")
+
+        assert retrieved is not None
+        assert retrieved.frame_id == "test-frame-2"
+        assert retrieved.depth == 1
+        assert retrieved.parent_id == "parent-frame"
+        assert retrieved.evidence == ["evidence-1"]
+
+    def test_retrieve_nonexistent_frame_returns_none(self, store_with_frames):
+        """retrieve_frame should return None for missing frames."""
+        result = store_with_frames.retrieve_frame("nonexistent-id")
+        assert result is None
+
+    def test_list_frames_empty(self, store_with_frames):
+        """list_frames should return empty list when no frames stored."""
+        frames = store_with_frames.list_frames()
+        assert frames == []
+
+    def test_list_frames_returns_all(self, store_with_frames):
+        """list_frames should return all stored frames."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        for i in range(3):
+            frame = CausalFrame(
+                frame_id=f"frame-{i}",
+                depth=i,
+                parent_id=f"frame-{i-1}" if i > 0 else None,
+                children=[],
+                query=f"query {i}",
+                context_slice=ContextSlice(
+                    files={},
+                    memory_refs=[],
+                    tool_outputs={},
+                    token_budget=1000,
+                ),
+                evidence=[],
+                conclusion=f"conclusion {i}",
+                confidence=0.9,
+                invalidation_condition="",
+                status=FrameStatus.COMPLETED,
+                branched_from=None,
+                escalation_reason=None,
+                created_at=datetime.now(),
+                completed_at=datetime.now(),
+            )
+            store_with_frames.store_frame(frame)
+
+        frames = store_with_frames.list_frames()
+        assert len(frames) == 3
+        frame_ids = {f.frame_id for f in frames}
+        assert frame_ids == {"frame-0", "frame-1", "frame-2"}
+
+    def test_frame_methods_work_with_pure_python(self, store_with_frames):
+        """Frame storage methods work without rlm_core dependency."""
+        from datetime import datetime
+
+        from src.causal_frame import CausalFrame, FrameStatus
+        from src.context_slice import ContextSlice
+
+        # Create a frame using pure Python (no rlm_core)
+        frame = CausalFrame(
+            frame_id="pure-python-frame",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="pure python test",
+            context_slice=ContextSlice(
+                files={"app.py": "def main(): pass"},
+                memory_refs=[],
+                tool_outputs={},
+                token_budget=2000,
+            ),
+            evidence=[],
+            conclusion="works without rlm_core",
+            confidence=1.0,
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        # Store and retrieve should work
+        store_with_frames.store_frame(frame)
+        retrieved = store_with_frames.retrieve_frame("pure-python-frame")
+
+        assert retrieved is not None
+        assert retrieved.query == "pure python test"
+        assert "app.py" in retrieved.context_slice.files

@@ -48,6 +48,7 @@ class RecursiveREPL:
         trajectory: TrajectoryStream | None = None,
         parent: RecursiveREPL | None = None,
         budget_tracker: Any | None = None,
+        parent_frame_id: str | None = None,
     ):
         """
         Initialize recursive REPL.
@@ -61,6 +62,7 @@ class RecursiveREPL:
             trajectory: Trajectory stream for event logging
             parent: Parent REPL (for cost aggregation)
             budget_tracker: Optional EnhancedBudgetTracker for adaptive depth
+            parent_frame_id: Parent frame ID for CausalFrame tree (SPEC-17)
         """
         self.context = context
         self.depth = depth
@@ -71,6 +73,10 @@ class RecursiveREPL:
         self.parent = parent
         self.child_repls: list[RecursiveREPL] = []
         self.budget_tracker = budget_tracker
+
+        # CausalFrame tracking (SPEC-17)
+        self.parent_frame_id = parent_frame_id
+        self._current_frame_id: str | None = parent_frame_id
 
         # Cost tracking
         self._tokens_used = 0
@@ -298,6 +304,7 @@ class RecursiveREPL:
             trajectory=self.trajectory,
             parent=self,
             budget_tracker=self.budget_tracker,  # Pass down for adaptive depth
+            parent_frame_id=self._current_frame_id,  # Pass current frame as parent (SPEC-17)
         )
         # Inherit model override if set
         if self._model_override:

@@ -626,3 +626,95 @@ class TestRecursiveCallResult:
 
         assert len(result.child_results) == 1
         assert result.had_repl is True
+
+
+class TestRecursiveREPLFrameTracking:
+    """Tests for CausalFrame parent_frame_id tracking (SPEC-17)."""
+
+    def test_init_with_parent_frame_id(self, basic_context, mock_router, basic_config):
+        """Can initialize with parent_frame_id."""
+        repl = RecursiveREPL(
+            context=basic_context,
+            config=basic_config,
+            router=mock_router,
+            parent_frame_id="frame-abc123",
+        )
+
+        assert repl.parent_frame_id == "frame-abc123"
+        assert repl._current_frame_id == "frame-abc123"
+
+    def test_init_without_parent_frame_id(self, basic_context, mock_router, basic_config):
+        """Can initialize without parent_frame_id (root frame)."""
+        repl = RecursiveREPL(
+            context=basic_context,
+            config=basic_config,
+            router=mock_router,
+        )
+
+        assert repl.parent_frame_id is None
+        assert repl._current_frame_id is None
+
+    @pytest.mark.asyncio
+    async def test_child_inherits_parent_frame_id(self, basic_context, mock_router, basic_config):
+        """Child REPL should inherit current frame as parent_frame_id."""
+        # Create parent with a current frame
+        parent = RecursiveREPL(
+            context=basic_context,
+            depth=0,
+            max_depth=3,
+            config=basic_config,
+            router=mock_router,
+            parent_frame_id="root-frame",
+        )
+        # Simulate parent creating a frame during execution
+        parent._current_frame_id = "parent-exec-frame"
+
+        # Spawn child REPL
+        await parent.recursive_query(
+            query="Sub task",
+            context=basic_context,
+            spawn_repl=True,
+        )
+
+        assert len(parent.child_repls) == 1
+        child = parent.child_repls[0]
+
+        # Child should have parent's current frame as parent_frame_id
+        assert child.parent_frame_id == "parent-exec-frame"
+        assert child._current_frame_id == "parent-exec-frame"
+
+    @pytest.mark.asyncio
+    async def test_nested_depth_propagation(self, basic_context, mock_router, basic_config):
+        """Frame ID propagates through multiple levels of recursion."""
+        root = RecursiveREPL(
+            context=basic_context,
+            depth=0,
+            max_depth=4,
+            config=basic_config,
+            router=mock_router,
+            parent_frame_id=None,  # Root has no parent
+        )
+        root._current_frame_id = "root-frame-1"
+
+        # First level child
+        await root.recursive_query(
+            query="Level 1",
+            context=basic_context,
+            spawn_repl=True,
+        )
+        level_1 = root.child_repls[0]
+        assert level_1.parent_frame_id == "root-frame-1"
+
+        # Simulate level 1 creating its own frame
+        level_1._current_frame_id = "level-1-frame"
+
+        # Second level child
+        await level_1.recursive_query(
+            query="Level 2",
+            context=basic_context,
+            spawn_repl=True,
+        )
+        level_2 = level_1.child_repls[0]
+
+        # Level 2 should have level 1's current frame as parent
+        assert level_2.parent_frame_id == "level-1-frame"

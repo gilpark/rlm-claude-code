@@ -169,6 +169,50 @@ echo "$HOME/src/loop/rlm-core/python" > "$PLUGIN_DIR/.venv/lib/python3.12/site-p
 
 ## Architecture
 
+### Overview Diagram (Mermaid)
+
+```mermaid
+graph TB
+    subgraph "RLM Claude Core Architecture"
+        User[User Query] --> RLAPH[RLAPH Loop]
+        RLAPH --> CodeGen[Code Generation]
+        CodeGen --> REPL[Python REPL]
+        REPL --> Exec[Execute Code]
+        Exec --> Result[Execution Result]
+        Result --> CF[Causal Frame System]
+        CF --> MS[Memory Store]
+
+        subgraph "Causal Frame System (SPEC-17)"
+            CFFrame[CausalFrame]
+            CFSlice[ContextSlice]
+            CFIndex[FrameIndex]
+            CFLife[FrameLifecycle]
+
+            CFFrame --> CFSlice
+            CFFrame --> CFIndex
+            CFIndex --> CFLife
+        end
+
+        subgraph "Memory Store (SPEC-02/17)"
+            MSStore[MemoryStore]
+            MSNodes[Nodes & Facts]
+            MSEdges[Hyperedges]
+            MSFrames[Frame Storage]
+
+            MSStore --> MSNodes
+            MSStore --> MSEdges
+            MSStore --> MSFrames
+        end
+
+        CF --> MSStore
+        RLAPH --> CFFrame
+    end
+
+    style RLAPH fill:#e1f5ff
+    style CF fill:#fff4e1
+    style MS fill:#e8f5e9
+```
+
 ```
 User Query
     │
@@ -239,6 +283,61 @@ User Query
 Final Answer
 ```
 
+### Causal Frame Flow (SPEC-17)
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant RLAPH as RLAPH Loop
+    participant REPL as Python REPL
+    participant CF as CausalFrame
+    participant MS as MemoryStore
+
+    User->>RLAPH: Submit Query
+    RLAPH->>REPL: Execute Code
+
+    Note over REPL: Context tracked in<br/>files_read, tool_outputs
+
+    REPL-->>RLAPH: Return Result
+
+    Note over RLAPH: Post-hoc frame creation<br/>(AFTER execution)
+
+    RLAPH->>CF: Create Frame
+    CF->>CF: Set parent_frame_id
+    CF->>CF: Record context_slice
+
+    alt Recursive llm() call
+        RLAPH->>CF: Create child frame (depth+1)
+        CF->>CF: Link parent.children
+    end
+
+    CF->>MS: store_frame()
+    MS->>MS: Persist to JSON
+
+    RLAPH-->>User: Return Response
+```
+
+### Memory Store Integration (SPEC-17)
+
+```mermaid
+graph LR
+    subgraph "Memory Store Architecture"
+        CF[Causal Frame] -->|store_frame| MS[MemoryStore]
+        RLAPH[RLAPH Loop] -->|Post-hoc creation| CF
+
+        MS --> Frames[Frame Storage<br/>JSON files]
+        MS --> Nodes[Node Storage<br/>SQLite]
+        MS --> Edges[Hyperedge Storage]
+
+        Frames -->|retrieve_frame| CF2[Loaded Frame]
+        CF2 -->|Query context| RLAPH
+    end
+
+    style MS fill:#e8f5e9
+    style CF fill:#fff4e1
+    style Frames fill:#e1f5ff
+```
+
 ---
 
 ## rlm-core Integration (Optional)
@@ -306,6 +405,50 @@ activate, reason = should_activate_rlm("Find security vulnerabilities", ctx)
 ---
 
 ## Core Components
+
+### Causal Frame System (SPEC-17)
+
+Tree-structured frames for tracking RLM execution context and causality:
+
+**Key Insight**: The real danger in RLM isn't hallucination — it's unchecked propagation. A wrong result at depth-1 becomes evidence at depth-0.
+
+```python
+from src.causal_frame import CausalFrame, FrameStatus
+from src.context_slice import ContextSlice
+from src.memory_store import MemoryStore
+
+# Create a frame after REPL execution (post-hoc)
+frame = CausalFrame(
+    frame_id="frame-001",
+    depth=0,
+    parent_id=None,
+    children=[],
+    query="Analyze the authentication flow",
+    context_slice=ContextSlice(
+        files_read={"auth.py": "..."},
+        memory_refs=["fact-123"],
+        tool_outputs={"bash": "...output..."},
+        token_budget=10000,
+    ),
+    evidence=["evidence-1", "evidence-2"],
+    conclusion="Authentication uses JWT tokens",
+    confidence=0.95,
+    status=FrameStatus.COMPLETED,
+)
+
+# Store for persistence
+store = MemoryStore(db_path="~/.claude/rlm-memory.db")
+store.store_frame(frame)
+
+# Retrieve later
+loaded = store.retrieve_frame("frame-001")
+```
+
+**Frame Lifecycle**:
+```
+CREATED → ACTIVE → SUSPENDED → COMPLETED → INVALIDATED
+                  ↘ PIVOTED
+```
 
 ### REPL Environment
 

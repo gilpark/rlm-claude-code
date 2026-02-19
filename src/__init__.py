@@ -386,6 +386,19 @@ from .types import SessionContext
 # User preferences and tools
 from .user_preferences import PreferencesManager, UserPreferences
 
+# Causal Frames (SPEC-17)
+from .context_slice import ContextSlice
+from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
+from .frame_index import FrameIndex
+from .frame_lifecycle import FrameLifecycle
+from .frame_invalidation import propagate_invalidation
+from .frame_serialization import serialize_frame, deserialize_frame
+from .session_artifacts import SessionArtifacts, FileRecord
+from .session_comparison import SessionDiff, compare_sessions
+from .plugin_interface import CoreContext, RLMPlugin, PluginError
+from .plugin_registry import PluginRegistry as CausalFramePluginRegistry
+from .plugins.default_plugin import DefaultRLMPlugin
+
 __all__ = [
     # Async execution (SPEC-08.01-08.06)
     "AsyncExecutor",
@@ -694,4 +707,23 @@ __all__ = [
     "VerificationMode",
     "compute_evidence_support",
     "extract_evidence_references",
+    # Causal Frames (SPEC-17)
+    "ContextSlice",
+    "CausalFrame",
+    "FrameStatus",
+    "compute_frame_id",
+    "FrameIndex",
+    "FrameLifecycle",
+    "propagate_invalidation",
+    "serialize_frame",
+    "deserialize_frame",
+    "SessionArtifacts",
+    "FileRecord",
+    "SessionDiff",
+    "compare_sessions",
+    "CoreContext",
+    "RLMPlugin",
+    "PluginError",
+    "CausalFramePluginRegistry",
+    "DefaultRLMPlugin",
 ]

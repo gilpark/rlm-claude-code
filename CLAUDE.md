@@ -171,6 +171,47 @@ SPEC implementations:
 | SPEC-03 | Memory Evolution | Complete |
 | SPEC-04 | Reasoning Traces | Complete |
 | SPEC-05 | Enhanced Budget Tracking | Complete |
+| SPEC-17 | Causal Frames | Complete |
+
+### Causal Frames (2026-02)
+
+Tree-structured frames for RLM execution with propagation control.
+
+**Key Insight**: The real danger in RLM isn't hallucination — it's unchecked propagation. A wrong result at depth-1 becomes evidence at depth-0.
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| CausalFrame + FrameStatus | Complete | Tree-structured storage |
+| ContextSlice | Complete | Partitioned context per frame |
+| FrameIndex | Complete | Flat index with O(n) lookup |
+| FrameLifecycle | Complete | State machine transitions |
+| propagate_invalidation | Complete | Cascade invalidation |
+| serialize/deserialize | Complete | JSON serialization |
+| SessionArtifacts | Complete | Cross-session comparison |
+| Plugin Architecture | Complete | CoreContext + RLMPlugin |
+| RLAPH Integration | Complete | Post-hoc frame creation after REPL |
+| MemoryStore Integration | Complete | store_frame, retrieve_frame, list_frames |
+| RecursiveREPL Tracking | Complete | parent_frame_id propagation |
+
+**Design Principle**: "LM decides, Core records"
+- Core enforces `token_budget` only
+- Root LM chooses context via tool calls (peek/grep/spawn_child)
+- Core records `confidence`, Root LM decides escalation
+
+**Key Types**:
+- `CausalFrame` — frame_id, depth, parent_id, children, query, context_slice, evidence, conclusion, confidence, status
+- `ContextSlice` — files_read, memory_refs, tool_outputs, token_budget
+- `FrameIndex` — get_active_frames(), get_suspended_frames(), get_pivots()
+- `FrameLifecycle` — CREATED → ACTIVE → SUSPENDED → COMPLETED → INVALIDATED
+- `FrameStatus` — Enum for frame state machine
+- `RLMPlugin` — transform_input(), parse_output(), store()
+
+**MemoryStore Frame Methods (SPEC-17)**:
+- `store_frame(frame)` — Persist CausalFrame to disk (JSON)
+- `retrieve_frame(frame_id)` — Load frame by ID
+- `list_frames(session_id?)` — Enumerate stored frames
+
+See [SPEC-17](docs/spec/17-causal-frames.md) for details.
 
 ### RLAPH Refactoring (2026-02)
 

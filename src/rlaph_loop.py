@@ -192,6 +192,7 @@ class RLAPHLoop:
             config=self.config,
             router=self.router,
             trajectory=self.trajectory,
+            parent_frame_id=self._current_frame_id,  # Pass for CausalFrame tree (SPEC-17)
         )
         self.repl = RLMEnvironment(context, recursive_handler=self.recursive_handler)
 

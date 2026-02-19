@@ -61,6 +61,9 @@ SPEC-13 (Rich Output) ────► SPEC-04, SPEC-05
 SPEC-14 (Always-On) ──────► SPEC-05, SPEC-06, SPEC-13
 SPEC-15 (Lean REPL) ──────► SPEC-01, SPEC-13, SPEC-14 [DEFERRED]
 SPEC-16 (Epistemic) ──────► SPEC-01, SPEC-04, SPEC-05
+
+Phase 4 (Causal Frames):
+SPEC-17 (Causal Frames) ──► SPEC-02, SPEC-04
 ```
 
 ## Success Criteria
@@ -136,6 +139,26 @@ SPEC-16 (Epistemic) ──────► SPEC-01, SPEC-04, SPEC-05
 - ✅ SPEC-16.11-16.20: Reasoning traces integration
 - ✅ SPEC-16.21-16.30: Orchestrator integration (always-on)
 - ✅ SPEC-16.31-16.40: Polish & optimization
+
+### Phase 4: Causal Frames (Core Complete, Integration Pending)
+
+| Priority | Component | Spec Document | Status |
+|----------|-----------|---------------|--------|
+| P0 | Causal Frame Core | [SPEC-17](./17-causal-frames.md) | ✅ Complete |
+| P1 | Frame Index & Lifecycle | [SPEC-17](./17-causal-frames.md) | ✅ Complete |
+| P1 | Frame Invalidation | [SPEC-17](./17-causal-frames.md) | ✅ Complete |
+| P2 | Session Artifacts | [SPEC-17](./17-causal-frames.md) | ✅ Complete |
+| P2 | Plugin Architecture | [SPEC-17](./17-causal-frames.md) | ✅ Complete |
+| P1 | RLAPH Integration | — | ⏳ Pending |
+| P2 | Session Manager Integration | — | ⏳ Pending |
+
+**Key Changes**:
+- Tree-structured `CausalFrame` replacing flat `CausalTrace`
+- Propagation control with cascade invalidation
+- Plugin architecture for custom RLM behaviors
+- "LM decides, Core records" design principle
+
+See [ADR-011](../process/architecture.md) for architecture decision.
 
 ### Phase 4: RLAPH Refactoring (Complete - 2026-02)
 

@@ -1,4 +1,4 @@
-# SPEC-06: Causal Frames
+# SPEC-17: Causal Frames
 
 *February 2026 — v4 with Propagation Control*
 
