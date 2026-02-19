@@ -393,11 +393,17 @@ from .frame_index import FrameIndex
 from .frame_lifecycle import FrameLifecycle
 from .frame_invalidation import propagate_invalidation
 from .frame_serialization import serialize_frame, deserialize_frame
+from .frame_store import FrameStore
 from .session_artifacts import SessionArtifacts, FileRecord
 from .session_comparison import SessionDiff, compare_sessions
 from .plugin_interface import CoreContext, RLMPlugin, PluginError
 from .plugin_registry import PluginRegistry as CausalFramePluginRegistry
 from .plugins.default_plugin import DefaultRLMPlugin
+
+# v2 REPL Layer
+from .rlaph_loop import RLAPHLoop, RLPALoopResult
+from .llm_client import LLMClient, LLMError
+from .tool_bridge import ToolResult
 
 __all__ = [
     # Async execution (SPEC-08.01-08.06)
@@ -717,6 +723,7 @@ __all__ = [
     "propagate_invalidation",
     "serialize_frame",
     "deserialize_frame",
+    "FrameStore",
     "SessionArtifacts",
     "FileRecord",
     "SessionDiff",
@@ -726,4 +733,10 @@ __all__ = [
     "PluginError",
     "CausalFramePluginRegistry",
     "DefaultRLMPlugin",
+    # v2 REPL Layer
+    "RLAPHLoop",
+    "RLPALoopResult",
+    "LLMClient",
+    "LLMError",
+    "ToolResult",
 ]
