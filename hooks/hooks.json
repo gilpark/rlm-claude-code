@@ -1,5 +1,5 @@
 {
-  "description": "RLM plugin hooks - simplified for hybrid architecture",
+  "description": "RLM v2 plugin hooks - REPL + CausalFrame",
   "hooks": {
     "SessionStart": [
       {
@@ -7,35 +7,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/init_rlm.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/compare_sessions.py",
             "timeout": 5000,
-            "description": "Initialize RLM environment and load config"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/check_complexity.sh",
-            "timeout": 3000,
-            "description": "Check if RLM should activate based on task complexity"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/sync_context.sh",
-            "timeout": 5000,
-            "description": "Sync context before tool execution"
+            "description": "Compare with prior session, surface invalidated frames"
           }
         ]
       }
@@ -46,22 +20,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/capture_output.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/capture_output.py",
             "timeout": 5000,
-            "description": "Capture tool output after execution"
-          }
-        ]
-      }
-    ],
-    "PreCompact": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/externalize_context.sh",
-            "timeout": 10000,
-            "description": "Externalize context before compaction"
+            "description": "Capture tool output into active CausalFrame"
           }
         ]
       }
@@ -72,9 +33,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hooks/save_trajectory.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/extract_frames.py",
             "timeout": 5000,
-            "description": "Save RLM trajectory on session end"
+            "description": "Extract frame tree, save to FrameStore"
           }
         ]
       }
