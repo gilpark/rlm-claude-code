@@ -9,6 +9,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import anthropic
+
 
 class LLMError(Exception):
     """LLM call failed."""
@@ -26,17 +28,32 @@ class LLMClient:
 
     api_key: str | None = None
     default_model: str = "glm-4.7"
+    base_url: str | None = None
     model_cascade: dict[int, str] = field(default_factory=lambda: {
         0: "glm-4.7",  # root
         1: "glm-4.7",  # depth 1
         2: "glm-4.7",  # depth 2+
         3: "glm-4.7",
     })
+    _client: anthropic.Anthropic | None = field(default=None, repr=False)
 
     def __post_init__(self):
         """Initialize API key from environment if not provided."""
         if self.api_key is None:
-            self.api_key = os.environ.get("ANTHROPIC_API_KEY")
+            self.api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        if self.base_url is None:
+            self.base_url = os.environ.get("ANTHROPIC_BASE_URL")
+
+    def _get_client(self) -> anthropic.Anthropic:
+        """Get or create Anthropic client."""
+        if self._client is None:
+            if not self.api_key:
+                raise LLMError("ANTHROPIC_API_KEY not set")
+            client_kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            object.__setattr__(self, "_client", anthropic.Anthropic(**client_kwargs))
+        return self._client
 
     def get_model_for_depth(self, depth: int) -> str:
         """
@@ -67,6 +84,8 @@ class LLMClient:
         context: dict[str, Any] | None = None,
         model: str | None = None,
         depth: int = 0,
+        max_tokens: int = 4096,
+        system: str | None = None,
     ) -> str:
         """
         Make a synchronous LLM call.
@@ -76,6 +95,8 @@ class LLMClient:
             context: Optional context dict (files, prior_results, etc.)
             model: Optional model override (None = use default for depth)
             depth: Current recursion depth for model selection
+            max_tokens: Maximum tokens in response
+            system: Optional system prompt
 
         Returns:
             LLM response as string
@@ -94,7 +115,7 @@ class LLMClient:
         full_prompt = self._build_prompt(query, context)
 
         # Make the actual API call
-        return self._api_call(selected_model, full_prompt)
+        return self._api_call(selected_model, full_prompt, max_tokens, system)
 
     def _build_prompt(self, query: str, context: dict[str, Any] | None) -> str:
         """Build full prompt from query and context."""
@@ -116,16 +137,40 @@ class LLMClient:
         parts.append(f"\n{query}")
         return "\n\n".join(parts)
 
-    def _api_call(self, model: str, prompt: str) -> str:
-        """
-        Make the actual API call.
+    def _api_call(
+        self,
+        model: str,
+        prompt: str,
+        max_tokens: int = 4096,
+        system: str | None = None,
+    ) -> str:
+        """Make the actual API call to Anthropic."""
+        try:
+            client = self._get_client()
 
-        This is a placeholder that should be implemented based on
-        the actual LLM provider being used.
-        """
-        # Placeholder - actual implementation depends on provider
-        # For testing, this can be mocked
-        raise LLMError("LLMClient._api_call not implemented - subclass or mock required")
+            request_params: dict[str, Any] = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+
+            if system:
+                request_params["system"] = system
+
+            response = client.messages.create(**request_params)
+
+            # Extract text from response blocks
+            content = ""
+            for block in response.content:
+                if block.type == "text":
+                    content += block.text
+
+            return content
+
+        except anthropic.APIError as e:
+            raise LLMError(f"Anthropic API error: {e}") from e
+        except Exception as e:
+            raise LLMError(f"LLM call failed: {e}") from e
 
 
 __all__ = ["LLMClient", "LLMError"]
