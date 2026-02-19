@@ -9,9 +9,12 @@ Pydantic models for the unified session.json schema.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from .causal_frame import CausalFrame
 
 
 class ActivationMode(str, Enum):
@@ -89,6 +92,8 @@ class SessionContextData(BaseModel):
     files: dict[str, FileInfo] = Field(default_factory=dict)
     tool_outputs: list[ToolOutputEntry] = Field(default_factory=list, max_length=100)
     working_memory: dict[str, Any] = Field(default_factory=dict)
+    causal_frames: list[Any] = Field(default_factory=list)  # CausalFrame objects (dataclass)
+    frame_transitions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CellIndexInfo(BaseModel):
