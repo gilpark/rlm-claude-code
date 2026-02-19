@@ -1,10 +1,10 @@
-# RLM Context Management Skill
+# Causeway Context Management Skill
 
 ## When to Activate
 
 This skill activates when:
 - Context exceeds complexity threshold (cross-file reasoning, debugging with large output, multi-module tasks)
-- User explicitly requests RLM mode (`/rlm`)
+- User explicitly requests causeway mode (`/causeway`)
 - Task requires verification chains (depth=2 patterns)
 
 ## Capabilities
@@ -19,12 +19,12 @@ This skill activates when:
 - `peek(var, start, end)` — View portion of context
 - `search(var, pattern, regex=False)` — Find patterns in context
 - `summarize(var, max_tokens=500)` — Summarize via sub-call
-- `recursive_query(query, context)` — Spawn sub-RLM call
+- `llm(query, context)` — Immediate recursive LLM call
 
-### Verification Tools
-- `pydantic` — Schema validation for structured data
-- `hypothesis` — Property-based testing
-- `cpmpy` — Constraint programming (available as `cp`)
+### Causal Operations
+- CausalFrame tree tracking
+- Invalidation cascade on file changes
+- Suspended branch recovery
 
 ## Strategy Selection
 
@@ -44,7 +44,7 @@ This skill activates when:
 1. Identify all affected files via search
 2. Recursive query for each file's current state
 3. Plan changes with dependency awareness
-4. Verify with CPMpy constraint model (depth=2)
+4. Track changes in CausalFrame tree
 
 ## Output Protocol
 
@@ -52,27 +52,19 @@ Signal completion with:
 - `FINAL(answer)` — Direct answer
 - `FINAL_VAR(var_name)` — Answer stored in variable
 
-## Trajectory
-
-All RLM operations emit trajectory events for visibility:
-- ANALYZE, REPL, REASON, RECURSE, FINAL
-- Streaming output with configurable verbosity
-- JSON export for debugging
-
 ## Configuration
 
 ```json
 {
-  "rlm": {
+  "causeway": {
     "activation": {"mode": "complexity"},
-    "depth": {"default": 2, "max": 3},
-    "trajectory": {"verbosity": "normal", "streaming": true}
+    "depth": {"default": 2, "max": 3}
   }
 }
 ```
 
 ## References
 
-- Spec: rlm-claude-code-spec.md
+- Design: docs/plans/2026-02-19-design.md
+- Whitepaper: docs/plans/2026-02-19-whitepaper.md
 - RLM Paper: https://arxiv.org/abs/2512.24601v1
-- CPMpy Docs: https://cpmpy.readthedocs.io/

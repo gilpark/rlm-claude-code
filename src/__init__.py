@@ -1,14 +1,16 @@
-"""RLM-Claude-Code v2: REPL + CausalFrame persistence.
+"""Causeway v2: REPL + CausalFrame persistence.
 
-Transform Claude Code into an RLM agent for unbounded context handling
-and improved reasoning via REPL-based context decomposition.
+Causal awareness for Claude Code - externalize reasoning, evolve with
+your environment through REPL-based context decomposition.
 
 v2 Architecture:
 - REPL: Spatial externalization within session
 - CausalFrame: Temporal persistence across sessions
+
+Based on: Zhang et al., "Recursive Language Models" (2025)
 """
 
-__version__ = "2.0.0"
+__version__ = "0.0.1"
 
 # REPL Layer
 from .rlaph_loop import RLAPHLoop, RLPALoopResult

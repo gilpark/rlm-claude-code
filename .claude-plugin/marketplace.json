@@ -1,16 +1,16 @@
 {
-  "name": "rlm-claude-code",
-  "description": "Marketplace for RLM-Claude-Code: Recursive Language Model with intelligent multi-provider routing",
+  "name": "causeway",
+  "description": "Causeway: Causal awareness for Claude Code - externalize reasoning, evolve with your environment",
   "owner": {
     "name": "rand",
     "url": "https://github.com/rand"
   },
   "plugins": [
     {
-      "name": "rlm-claude-code",
+      "name": "causeway",
       "source": "./",
-      "description": "Recursive Language Model integration for Claude Code - intelligent multi-provider routing and unbounded context handling",
-      "version": "0.7.0"
+      "description": "Causal awareness for Claude Code - REPL + CausalFrame persistence for evolving AI work products",
+      "version": "0.0.1"
     }
   ]
 }

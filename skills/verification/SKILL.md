@@ -1,4 +1,4 @@
-# Constraint Verification Skill
+# Causeway Constraint Verification Skill
 
 ## When to Activate
 
@@ -63,59 +63,29 @@ if model.solve():
     print("Schedule feasible")
 ```
 
-### Type Compatibility
-```python
-# Model subtype relationships as constraints
-# type_of[i] == j means variable i has type j
-type_of = cp.intvar(0, n_types-1, shape=n_vars, name="type")
-model = cp.Model()
-
-# Assignment x = y requires type_of[x] >= type_of[y] (subtype)
-for (x, y) in assignments:
-    model += type_of[x] >= type_of[y]
-
-model.solve()
-```
-
-### State Machine Validation
-```python
-# Verify state transitions are valid
-states = cp.intvar(0, n_states-1, shape=n_steps, name="state")
-model = cp.Model()
-
-for t in range(n_steps - 1):
-    # Encode valid transitions
-    valid_transitions = []
-    for (s1, s2) in allowed_transitions:
-        valid_transitions.append((states[t] == s1) & (states[t+1] == s2))
-    model += cp.any(valid_transitions)
-
-model.solve()
-```
-
-## Integration with RLM
+## Integration with Causeway
 
 At depth=2, use constraint verification to check proposed changes:
 
 ```python
-async def verify_with_constraints(change, context):
+def verify_with_constraints(change, context):
     """
     Verify a proposed change using constraint modeling.
     Called at depth=2 for safety verification.
     """
     import cpmpy as cp
-    
+
     # Extract invariants from docstrings/comments
     invariants = extract_invariants(context)
-    
+
     # Build constraint model
     model = cp.Model()
     for inv in invariants:
         model += encode_invariant(inv)
-    
+
     # Add change effects
     model += encode_change(change)
-    
+
     # Check satisfiability
     if model.solve():
         return {"safe": True, "witness": get_solution(model)}
@@ -126,5 +96,5 @@ async def verify_with_constraints(change, context):
 ## References
 
 - CPMpy Docs: https://cpmpy.readthedocs.io/
-- Spec §4.1.1: Extended Python Tooling
-- ADR-007: CPMpy for Constraint Verification
+- Design: docs/plans/2026-02-19-design.md
+- Whitepaper: docs/plans/2026-02-19-whitepaper.md

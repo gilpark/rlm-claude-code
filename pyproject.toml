@@ -1,7 +1,7 @@
 [project]
-name = "rlm-claude-code"
-version = "0.7.0"
-description = "Recursive Language Model integration for Claude Code"
+name = "causeway"
+version = "0.0.1"
+description = "Causeway: Causal awareness for Claude Code - REPL + CausalFrame persistence"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
