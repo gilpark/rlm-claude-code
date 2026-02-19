@@ -61,8 +61,7 @@ MICRO_MODE_BLOCKED = frozenset(
 
 if TYPE_CHECKING:
     from .cell_manager import CellManager
-    from .memory_store import MemoryStore
-    from .recursive_handler import RecursiveREPL
+    from .llm_client import LLMClient
     from .tool_bridge import ToolBridge
 
 # Subprocess allowlist for sandbox
@@ -125,7 +124,7 @@ class RLMEnvironment:
     def __init__(
         self,
         context: SessionContext,
-        recursive_handler: RecursiveREPL | None = None,
+        llm_client: LLMClient | None = None,
         use_restricted: bool = True,
         access_level: REPLAccessLevel = "standard",
     ):
@@ -134,7 +133,7 @@ class RLMEnvironment:
 
         Args:
             context: Session context to externalize
-            recursive_handler: Handler for recursive calls (depth>0)
+            llm_client: LLM client for recursive calls (v2)
             use_restricted: Whether to use RestrictedPython (default True)
             access_level: Function access level ("micro", "standard", "full")
                           - "micro": SPEC-14.03 restricted functions only
@@ -145,7 +144,7 @@ class RLMEnvironment:
         Implements: Spec SPEC-14.03-14.04 for micro mode
         """
         self.context = context
-        self.recursive_handler = recursive_handler
+        self.llm_client = llm_client
         self.use_restricted = use_restricted
         self.access_level = access_level
 
@@ -846,9 +845,9 @@ class RLMEnvironment:
         # Convert context to string if not None
         context_str = str(context)[:8000] if context is not None else ""
 
-        # RLAPH mode: Use synchronous handler
-        if self.recursive_handler:
-            return self.recursive_handler.llm_sync(query, context_str)
+        # v2: Use LLMClient for synchronous calls
+        if self.llm_client:
+            return self.llm_client.call(query, context={"prior": context_str} if context_str else None)
 
         # Fallback: Legacy deferred mode (for backward compatibility)
         # This path is kept for micro mode or when no handler is available
@@ -1941,7 +1940,7 @@ class RLMEnvironment:
             operation=operation,
             args=args,
             dependencies=dependencies,
-            depth=self.recursive_handler.depth if self.recursive_handler else 0,
+            depth=0,  # v2: depth tracking moved to rlaph_loop
         )
 
         # Track as current cell
@@ -2449,7 +2448,7 @@ def create_micro_environment(
     """
     return RLMEnvironment(
         context=context,
-        recursive_handler=None,  # No recursive calls in micro mode
+        llm_client=None,  # No recursive calls in micro mode
         use_restricted=use_restricted,
         access_level="micro",
     )

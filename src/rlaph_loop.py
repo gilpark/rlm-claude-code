@@ -31,12 +31,10 @@ from .frame_index import FrameIndex
 from .llm_client import LLMClient
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
-from .trajectory import StreamingTrajectory, TrajectoryEvent, TrajectoryEventType
 from .types import RecursionDepthError, SessionContext
 
 if TYPE_CHECKING:
-    from .recursive_handler import RecursiveREPL
-    from .trajectory import TrajectoryRenderer
+    pass  # No external type imports needed for v2
 
 
 @dataclass
@@ -88,7 +86,6 @@ class RLAPHLoop:
         max_depth: int = 3,
         config: RLMConfig | None = None,
         llm_client: LLMClient | None = None,
-        renderer: TrajectoryRenderer | None = None,
     ):
         """
         Initialize RLAPH loop.
@@ -98,7 +95,6 @@ class RLAPHLoop:
             max_depth: Maximum recursion depth for llm() calls
             config: RLM configuration
             llm_client: LLM client for API calls
-            renderer: Trajectory renderer for output
         """
         self.max_iterations = max_iterations
         self.max_depth = max_depth
@@ -107,16 +103,9 @@ class RLAPHLoop:
 
         # State
         self.repl: RLMEnvironment | None = None
-        self.recursive_handler: RecursiveREPL | None = None
         self.history: list[dict] = []
         self._depth = 0
         self._tokens_used = 0
-
-        # Trajectory
-        if renderer:
-            self.trajectory = StreamingTrajectory(renderer)
-        else:
-            self.trajectory = None
 
         # Parser
         self.parser = ResponseParser()
@@ -144,11 +133,8 @@ class RLAPHLoop:
 
     @property
     def total_tokens_used(self) -> int:
-        """Total tokens used including recursive calls."""
-        total = self._tokens_used
-        if self.recursive_handler:
-            total += self.recursive_handler.total_tokens_used
-        return total
+        """Total tokens used."""
+        return self._tokens_used
 
     async def run(
         self,
@@ -182,19 +168,8 @@ class RLAPHLoop:
             depth=self._depth,
         )
 
-        # Initialize REPL with recursive handler
-        from .recursive_handler import RecursiveREPL
-
-        self.recursive_handler = RecursiveREPL(
-            context=context,
-            depth=self._depth,
-            max_depth=self.max_depth,
-            config=self.config,
-            llm_client=self.llm_client,
-            trajectory=self.trajectory,
-            parent_frame_id=self._current_frame_id,  # Pass for CausalFrame tree (SPEC-17)
-        )
-        self.repl = RLMEnvironment(context, recursive_handler=self.recursive_handler)
+        # Initialize REPL with LLM client for v2
+        self.repl = RLMEnvironment(context, llm_client=self.llm_client)
 
         # Enable file access for context externalization
         # This is critical for RLM to handle large contexts:
@@ -207,17 +182,6 @@ class RLAPHLoop:
         state.messages = [
             {"role": "user", "content": query},
         ]
-
-        # Emit start event
-        if self.trajectory:
-            await self.trajectory.emit(
-                TrajectoryEvent(
-                    type=TrajectoryEventType.RLM_START,
-                    depth=self._depth,
-                    content=f"RLAPH loop starting: {query[:100]}",
-                    metadata={"max_iterations": self.max_iterations, "max_depth": self.max_depth},
-                )
-            )
 
         # Main loop
         while state.turn < state.max_turns and state.final_answer is None:
@@ -236,17 +200,6 @@ class RLAPHLoop:
 
             # Track tokens
             self._tokens_used += len(response_content) // 4  # Rough estimate
-
-            # Emit reasoning event
-            if self.trajectory:
-                await self.trajectory.emit(
-                    TrajectoryEvent(
-                        type=TrajectoryEventType.REASON,
-                        depth=self._depth,
-                        content=response_content[:500],
-                        metadata={"turn": state.turn, "model": model},
-                    )
-                )
 
             # Parse response
             parsed_items = self.parser.parse(response_content)
@@ -271,32 +224,11 @@ class RLAPHLoop:
                     state.consecutive_thinking = 0
                     code = item.content
 
-                    # Emit REPL exec event
-                    if self.trajectory:
-                        await self.trajectory.emit(
-                            TrajectoryEvent(
-                                type=TrajectoryEventType.REPL_EXEC,
-                                depth=self._depth,
-                                content=code[:100],
-                                metadata={"turn": state.turn},
-                            )
-                        )
-
                     # Execute code synchronously
                     exec_result = self.repl.execute(code)
                     repl_result = (
                         exec_result.output if exec_result.success else f"Error: {exec_result.error}"
                     )
-
-                    # Emit REPL result event
-                    if self.trajectory:
-                        await self.trajectory.emit(
-                            TrajectoryEvent(
-                                type=TrajectoryEventType.REPL_RESULT,
-                                depth=self._depth,
-                                content=str(repl_result)[:500],
-                            )
-                        )
 
                     # === POST-HOC FRAME CREATION (SPEC-17) ===
                     context_slice = ContextSlice(
@@ -389,17 +321,6 @@ class RLAPHLoop:
         # Build result
         execution_time = (time.time() - start_time) * 1000
 
-        # Emit final event
-        if self.trajectory:
-            await self.trajectory.emit(
-                TrajectoryEvent(
-                    type=TrajectoryEventType.FINAL,
-                    depth=self._depth,
-                    content=state.final_answer or "No answer produced",
-                    metadata={"iterations": state.turn, "tokens_used": self.total_tokens_used},
-                )
-            )
-
         return RLPALoopResult(
             answer=state.final_answer or "No answer produced",
             iterations=state.turn,
@@ -428,15 +349,16 @@ class RLAPHLoop:
         Raises:
             RecursionDepthError: If max depth exceeded
         """
-        if not self.recursive_handler:
-            return "Error: No recursive handler available"
-
         # Check depth
         if self._depth >= self.max_depth:
             raise RecursionDepthError(self._depth + 1, self.max_depth)
 
-        # Use recursive handler's sync method
-        return self.recursive_handler.llm_sync(query, context)
+        # Use LLMClient directly for v2
+        return self.llm_client.call(
+            query=query,
+            context={"prior": context} if context else None,
+            depth=self._depth + 1,
+        )
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with REPL instructions."""
