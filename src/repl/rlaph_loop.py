@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -144,6 +145,7 @@ class RLAPHLoop:
         query: str,
         context: SessionContext,
         working_dir: Path | str | None = None,
+        session_id: str | None = None,
     ) -> RLPALoopResult:
         """
         Main loop - clean, predictable, debuggable.
@@ -161,10 +163,15 @@ class RLAPHLoop:
             query: User query
             context: Session context (files, conversation, etc.)
             working_dir: Working directory for file operations (default: cwd)
+            session_id: Optional session identifier for persistence (default: auto-generated UUID[:8])
 
         Returns:
             RLPALoopResult with answer and metadata
         """
+        # Generate session_id if not provided
+        if session_id is None:
+            session_id = str(uuid.uuid4())[:8]
+
         start_time = time.time()
         state = RLPALoopState(
             max_turns=self.max_iterations,
@@ -338,6 +345,14 @@ class RLAPHLoop:
 
         # Build result
         execution_time = (time.time() - start_time) * 1000
+
+        # Save frame index before returning (Phase 13: Persistence)
+        if len(self.frame_index) > 0:
+            try:
+                self.frame_index.save(session_id)
+            except Exception:
+                # Don't fail the run if save fails
+                pass
 
         return RLPALoopResult(
             answer=state.final_answer or "No answer produced",
