@@ -42,6 +42,109 @@ flowchart TB
 
 ---
 
+## Real Session Snapshot Example
+
+The following diagram shows actual frames from session `039f5c9f-e804-44d9-9946-1098a64c8c1b`:
+
+```mermaid
+flowchart LR
+    subgraph Session["Session: 039f5c9f-e804-44d9-9946-1098a64c8c1b"]
+        direction TB
+
+        subgraph Chain["Frame Chain (16 frames)"]
+            F1["Frame 82ab3024<br/>━━━━━━━━━━━<br/>rlaph_loop.py<br/>hash: fe7091ef"]
+            F2["Frame df34e859<br/>━━━━━━━━━━━<br/>repl_environment.py<br/>hash: 4138cffb"]
+            F3["Frame 3420dbd5<br/>━━━━━━━━━━━<br/>llm_client.py<br/>hash: 4fbca98c"]
+            F4["Frame 3af1f465<br/>━━━━━━━━━━━<br/>causal_frame.py<br/>hash: b3bb6cc4"]
+            F5["Frame 1b4e213a<br/>━━━━━━━━━━━<br/>frame_index.py<br/>hash: ..."]
+            F6["Frame 82f1c7fb<br/>━━━━━━━━━━━<br/>frame_store.py<br/>hash: ..."]
+            F7["Frame de16d66f<br/>━━━━━━━━━━━<br/>frame_invalidation.py<br/>hash: ..."]
+            FN["... 9 more frames<br/>━━━━━━━━━━━<br/>context_slice.py<br/>session_comparison.py<br/>session_artifacts.py<br/>run_orchestrator.py<br/>etc."]
+        end
+
+        F1 --> F2 --> F3 --> F4 --> F5 --> F6 --> F7 --> FN
+    end
+
+    style F1 fill:#c8e6c9
+    style FN fill:#bbdefb
+```
+
+### Frame Chain Data
+
+Each frame links to the previous via `parent_id`:
+
+| frame_id | parent_id | file read | query |
+|----------|-----------|-----------|-------|
+| `82ab3024` | `null` | rlaph_loop.py | `read_file("...rlaph_loop.py")` |
+| `df34e859` | `82ab3024` | repl_environment.py | `read_file("...repl_environment.py")` |
+| `3420dbd5` | `df34e859` | llm_client.py | `read_file("...llm_client.py")` |
+| `3af1f465` | `3420dbd5` | causal_frame.py | `read_file("...causal_frame.py")` |
+| `1b4e213a` | `3af1f465` | frame_index.py | `read_file("...frame_index.py")` |
+| `82f1c7fb` | `1b4e213a` | frame_store.py | `read_file("...frame_store.py")` |
+| `de16d66f` | `82f1c7fb` | frame_invalidation.py | `read_file("...frame_invalidation.py")` |
+| ... | ... | ... | ... |
+
+### Actual Frame JSON Example
+
+```json
+{
+  "frame_id": "82ab3024044daeb5",
+  "depth": 0,
+  "parent_id": null,
+  "children": [],
+  "query": "# Read the main RLM loop file\nread_file(\"/Users/gilpark/.../rlaph_loop.py\")",
+  "context_slice": {
+    "files": {
+      "/Users/gilpark/.../rlaph_loop.py": "fe7091ef08723e3f"
+    },
+    "memory_refs": [],
+    "tool_outputs": {},
+    "token_budget": 8000
+  },
+  "evidence": [],
+  "conclusion": "\"\"\"\nRLAPH Loop - Clean Recursive Language Agent with Python Handler...",
+  "confidence": 0.8,
+  "invalidation_condition": "",
+  "status": "completed",
+  "created_at": "2026-02-20T13:51:05.504746",
+  "completed_at": "2026-02-20T13:51:05.504755"
+}
+```
+
+### Context Slice Hashes
+
+The `context_slice.files` field stores content hashes for invalidation:
+
+```mermaid
+flowchart TB
+    subgraph Frame["Frame 82ab3024"]
+        Files["files: {<br/>  rlaph_loop.py: 'fe7091ef08723e3f'<br/>}"]
+    end
+
+    subgraph FileSystem["Current Files"]
+        CurrentRLM["rlaph_loop.py<br/>(current version)"]
+    end
+
+    subgraph Invalidation["Invalidation Check"]
+        Hash1["Stored hash:<br/>fe7091ef08723e3f"]
+        Hash2["Computed hash:<br/>????????????????"]
+        Compare{Match?}
+    end
+
+    Files --> Hash1
+    CurrentRLM -->|"hash()" Hash2
+    Hash1 --> Compare
+    Hash2 --> Compare
+
+    Compare -->|Yes| Valid["✓ Frame Valid"]
+    Compare -->|No| Invalid["✗ Frame Invalidated"]
+
+    style Valid fill:#c8e6c9
+    style Invalid fill:#ffcdd2
+```
+
+---
+
 ## 1. index.json - FrameIndex
 
 The master index of all CausalFrames in the session.
