@@ -102,6 +102,48 @@ sequenceDiagram
     end
 ```
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant M as Main LLM
+    participant R as RLM/REPL
+    participant FI as FrameIndex
+    participant FS as FrameStore
+    participant D as Disk Storage
+
+    Note over U,D: Phase 1-2: Initialization & Request
+    U->>M: Send query
+    M->>M: Determine if RLM needed
+
+    Note over M,D: Phase 3: RLM Invocation
+    M->>R: Invoke RLM with task
+    R->>FI: Initialize/load index
+
+    Note over R,D: Phase 4: Frame Retrieval
+    R->>FI: Search for relevant frames
+    FI->>FS: Find matching frame IDs
+    FS->>D: Load frame data
+    D-->>FS: Frame JSON
+    FS-->>R: CausalFrame objects
+
+    Note over R,D: Phase 5: Code Execution
+    R->>R: Execute Python code
+    R->>R: Access files via REPL
+
+    Note over R,D: Phase 6: Frame Creation
+    R->>R: Create new CausalFrame
+    R->>FS: Save frame
+    FS->>D: Write to frames.jsonl
+    R->>FI: Index new frame
+    FI->>D: Update index.json
+
+    Note over R,D: Phase 7-8: Response
+    R-->>M: Return results + frame refs
+    M->>M: Synthesize response
+    M->>U: Final response
+```
+
 ## Data Flow Summary
 
 ### Phase 1: Context Isolation (Main LLM)

@@ -1,6 +1,20 @@
 # RLM-Claude-Code: Design Document
 
-*February 2026 — v2*
+*February 2026 — v2.1*
+
+---
+
+## Current Reality vs. Vision (Feb 20, 2026)
+
+The core data model (CausalFrame + tree + invalidation) and spatial externalization (ContextMap + REPL) are implemented and working.
+Recursion now branches correctly (depth > 0, children populated).
+
+**What remains** is exercising the system over multiple sessions:
+- Change a file → see targeted invalidation
+- Ask to resume a suspended branch → see it pick up where it left off
+- Watch living documentation auto-update only affected sections
+
+These are not theoretical — the scaffolding is in place. The next unlock is multi-session workflows where prior knowledge survives code changes.
 
 ---
 
@@ -75,31 +89,31 @@ Neither mechanism works without the other.
 ```
 Claude Code
     │
-    └── rlm-claude-code (plugin)
+    └── rlm-orchestrator (entry point)
         │
-        ├── REPL Layer              ← spatial externalization (within session)
-        │   ├── repl_environment.py
-        │   ├── rlaph_loop.py
-        │   ├── llm_client.py
-        │   └── tool_bridge.py
+        ├── ContextMap              ← session-scoped, lazy file navigator (git ls-files or dynamic)
+        │   └── repl_environment.py
         │
-        ├── Causal Layer            ← temporal externalization (across sessions)
-        │   ├── causal_frame.py
+        ├── RLAPHLoop               ← synchronous recursion via llm(sub_query)
+        │   └── creates child frames + evidence links
+        │
+        ├── Causal Layer            ← persistent tree (JSONL)
+        │   ├── CausalFrame         ← now auto-generates invalidation_condition
+        │   ├── FrameIndex          ← children + evidence populated
         │   ├── context_slice.py
-        │   ├── frame_index.py
-        │   ├── frame_invalidation.py
+        │   ├── frame_invalidation.py ← cascade (down + sideways via find_dependent_frames)
         │   ├── frame_store.py
         │   ├── session_artifacts.py
         │   └── session_comparison.py
         │
-        ├── Plugin Layer            ← extensibility
+        ├── Plugin Layer            ← extensibility (future work)
         │   ├── plugin_interface.py
         │   └── plugins/
         │
-        └── hooks/                  ← where the two mechanisms connect
-            ├── SessionStart        → stitch sub-call frames, compare prior session
-            ├── PostToolUse         → capture tool outputs into active CausalFrame
-            └── Stop                → extract frame tree, save SessionArtifacts
+        └── hooks/                  ← connect REPL to Causal Layer
+            ├── SessionStart        → load prior frames + git diff invalidation
+            ├── PostToolUse         → capture tool outputs + refresh ContextMap
+            └── Stop                → save tree + initial_query
 ```
 
 The hooks are the coupling point: `PostToolUse` captures what the REPL saw into the active CausalFrame's context_slice. `Stop` persists the frame tree built during REPL execution. Without hooks, REPL and Causal Layer are independent modules. With hooks, they are one system.
@@ -109,6 +123,8 @@ The hooks are the coupling point: `PostToolUse` captures what the REPL saw into 
 ## Part 1: REPL Layer
 
 ### RLAPH Loop — Immediate Execution
+
+**Status: Fully implemented with synchronous recursion.** The `llm(sub_query)` call now creates child frames and returns results synchronously.
 
 The original approach stacks deferred/async LLM calls into a queue and batch-executes. This is fundamentally broken:
 
@@ -168,6 +184,8 @@ Provider swap happens in one place. Default model cascade: root uses larger mode
 
 ### REPL Functions
 
+**Status: Implemented.** `llm()` now supports synchronous recursion, creating child frames automatically.
+
 ```python
 peek(var, start, end)                    # inspect context before committing
 search(var, pattern)                     # narrow focus, find relevant parts
@@ -190,6 +208,8 @@ The LM never sees frames directly — it just calls `llm()` and gets a result. F
 ## Part 2: Causal Layer
 
 ### CausalFrame
+
+**Status: Fully implemented.** `invalidation_condition` is now auto-generated from `context_slice.files` and `tool_outputs`.
 
 ```python
 @dataclass
@@ -237,6 +257,8 @@ CausalFrame(
 
 ### ContextSlice
 
+**Status: Fully implemented with lazy loading and auto-discovery.** Files inside the working directory are discovered dynamically via git ls-files or filesystem scan.
+
 ```python
 @dataclass
 class ContextSlice:
@@ -261,6 +283,8 @@ result = llm(
 
 ### Invalidation
 
+**Status: Partially implemented.** Downward cascade (children) works. Sideways cascade via evidence links uses `find_dependent_frames` scan. Evidence linking adds child frame IDs to parent.evidence only on COMPLETED status.
+
 ```python
 def invalidate(frame_id: str, reason: str, index: dict) -> list[str]:
     invalidated = {frame_id}
@@ -284,6 +308,8 @@ Suspended frames are invalidated but preserved — recoverable if the invalidati
 
 ### Branch Management
 
+**Status: Data model implemented, usage coming soon.** The fields exist but real suspension/resumption logic is not yet exercised.
+
 Users pivot and backtrack. Two fields handle all cases:
 
 ```
@@ -303,9 +329,9 @@ pivots    = [f for f in index.values() if f.branched_from]
 
 ### FrameStore
 
-SQLite는 불필요하다. 10-20 frames는 JSONL이면 충분하고, 사람이 직접 읽을 수 있다.
+**Status: Implemented and working.** SQLite is unnecessary — 10-20 frames fit comfortably in JSONL, and it remains human-readable.
 
-**Sub-call 문제:** `llm()`이 sub-call을 만들면 Claude Code는 새 세션을 생성한다:
+**Sub-call stitching:** When `llm()` creates a sub-call, Claude Code creates a new session:
 
 ```
 root session: session_abc
@@ -313,16 +339,16 @@ root session: session_abc
         └── llm() → sub session: session_def
 ```
 
-CausalFrame tree가 여러 transcript에 쪼개진다. `PostToolUse` hook이 하나로 stitch한다:
+The CausalFrame tree gets split across multiple transcripts. The `PostToolUse` hook stitches them together:
 
 ```
-PostToolUse (sub-call 끝날 때마다)
-  → sub-call session_id + result 캡처
-  → root_session_id 추적
-  → root_session_id.jsonl에 append
+PostToolUse (after each sub-call completes)
+  → capture sub-call session_id + result
+  → track root_session_id
+  → append to root_session_id.jsonl
 ```
 
-결과: `~/.claude/rlm-frames/{root_session_id}.jsonl` 하나에 전체 call tree:
+Result: `~/.claude/rlm-frames/{root_session_id}.jsonl` contains the entire call tree:
 
 ```jsonl
 {"frame_id": "f1", "depth": 0, "session_id": "session_abc", "parent_id": null}
@@ -330,7 +356,7 @@ PostToolUse (sub-call 끝날 때마다)
 {"frame_id": "f3", "depth": 2, "session_id": "session_def", "parent_id": "f2"}
 ```
 
-`session_id`는 어느 Claude Code 세션에서 실행됐는지 추적. `parent_id`가 tree 구조를 담는다.
+`session_id` tracks which Claude Code session executed the frame. `parent_id` encodes the tree structure.
 
 ```python
 class FrameStore:
@@ -342,9 +368,11 @@ class FrameStore:
     def find_by_status(status) -> list           # list + filter
 ```
 
-의존성 제로. 파일 하나. 사람이 읽을 수 있다.
+Zero dependencies. One file. Human-readable.
 
 ### SessionArtifacts
+
+**Status: Implemented.** `initial_query` is now tracked in FrameIndex for session continuity.
 
 ```python
 @dataclass
@@ -370,9 +398,30 @@ diff = compare_sessions(current, prior, index)
 # → which suspended branches worth resuming?
 ```
 
+### Current Implementation Status (Feb 20, 2026)
+
+| Feature                        | Implemented? | Notes / Next |
+|--------------------------------|--------------|--------------|
+| Synchronous llm() recursion    | Yes          | llm(sub_query) creates child frames; depth tracking works |
+| Tree structure (children)      | Yes          | Populated in FrameIndex.add() |
+| Evidence linking               | Partial      | Added to parent.evidence on child completion (only COMPLETED) |
+| Auto invalidation_condition    | Yes          | Generated from context_slice.files & tool_outputs |
+| Cascade invalidation           | Partial      | Down to children + sideways via evidence; O(n) scan |
+| Git-aware change detection     | Yes          | commit_hash + git diff on load |
+| Query/intent tracking          | Yes          | initial_query saved in FrameIndex |
+| ContextMap lazy loading        | Yes          | git ls-files + dynamic discovery inside working dir |
+| Multi-session resumption       | No           | Data model ready; needs UI/skill to resume branches |
+| Living docs / surgical updates | No           | Hooks ready; needs plugin to re-run invalidated frames |
+| Plugin interface               | No           | Future work |
+
+The system now supports **real tree-structured reasoning** within a session.
+The next unlock is **multi-session workflows** where prior knowledge survives code changes.
+
 ---
 
 ## Part 3: Plugin Layer
+
+**Status: Future work.** The plugin interface is designed but not yet implemented.
 
 ### Why Plugins
 
@@ -462,6 +511,7 @@ Steps 1, 3, 5 differ per plugin. Everything else is Core.
 | Rejected | Reason |
 |----------|--------|
 | Deferred/async LLM stack | Error recovery is unclear, frame lifecycle is ambiguous |
+| Subprocess for recursion | Synchronous llm(sub_query) is simpler, faster, and sufficient for 10–20 frames |
 | DAG structure | n=10-20, O(n) scan is correct |
 | BranchPoint dataclass | status + branched_from is sufficient |
 | facts/experiences store | PROMOTED CausalFrame is the fact |
@@ -480,18 +530,18 @@ Steps 1, 3, 5 differ per plugin. Everything else is Core.
 
 ```
 src/
-├── rlaph_loop.py            # immediate execution loop
+├── rlaph_loop.py            # immediate execution loop with recursion
 ├── repl_environment.py      # peek, search, llm, llm_batch, map_reduce
 ├── llm_client.py            # provider-agnostic LLM calls
 ├── tool_bridge.py           # controlled tool access
 ├── causal_frame.py          # CausalFrame, FrameStatus, compute_frame_id
-├── context_slice.py         # ContextSlice, hash, budget
-├── frame_index.py           # dict[str, CausalFrame], branch queries
-├── frame_invalidation.py    # propagate_invalidation
+├── context_slice.py         # ContextSlice, hash, budget, lazy loading
+├── frame_index.py           # dict[str, CausalFrame], branch queries, initial_query
+├── frame_invalidation.py    # propagate_invalidation, find_dependent_frames
 ├── frame_store.py           # JSONL: save, load, list, find_by_status
 ├── session_artifacts.py     # SessionArtifacts, FileRecord
 ├── session_comparison.py    # compare_sessions, SessionDiff
-└── plugin_interface.py      # CoreContext, RLMPlugin protocol
+└── plugin_interface.py      # CoreContext, RLMPlugin protocol (future)
 
 scripts/
 ├── extract_frames.py        # Stop hook: extract + save
