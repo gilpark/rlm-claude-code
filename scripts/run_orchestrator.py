@@ -52,6 +52,24 @@ from typing import Any
 # Suppress third-party deprecation warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
 
+# Import for ContextMap (re-exported for test access)
+from src.frame.context_map import ContextMap, get_current_commit_hash as _get_current_commit_hash
+
+
+def get_current_commit_hash(root_dir: Path) -> str | None:
+    """
+    Get current git HEAD commit hash.
+
+    Re-exported from context_map for orchestrator use.
+
+    Args:
+        root_dir: Repository root directory
+
+    Returns:
+        8-char commit hash or None if not in git repo
+    """
+    return _get_current_commit_hash(root_dir)
+
 
 def get_or_create_session_id(explicit_id: str | None = None) -> str:
     """
@@ -280,21 +298,33 @@ async def run_rlaph(
     context_data = build_context(files={}, use_disk_fallback=False)
     context = build_session_context(context_data)
 
+    work_dir = working_dir or Path.cwd()
+
+    # Create ContextMap for session
+    context_map = ContextMap(work_dir)
+    commit_hash = context_map.commit_hash
+
     if verbose:
         print(f"[RLM:CONFIG] Max depth: {depth}")
-        if working_dir:
-            print(f"[RLM:CONFIG] Working dir: {working_dir}")
+        print(f"[RLM:CONFIG] Working dir: {work_dir}")
+        if commit_hash:
+            print(f"[RLM:CONFIG] Git commit: {commit_hash}")
 
     print(f"[RLM:QUERY] Processing ({len(query)} chars)")
+    print(f"[RLM:CONTEXT] {len(context_map.paths)} files in scope")
 
     # Create RLAPH loop (no renderer in v2 - verbose handled internally)
+    # NOTE: context_map parameter will be added in Task 5
     loop = RLAPHLoop(
         max_iterations=20,
         max_depth=depth,
     )
 
+    # Set commit_hash on frame index
+    loop.frame_index.commit_hash = commit_hash
+
     # Run loop
-    result = await loop.run(query, context, working_dir=working_dir, session_id=session_id)
+    result = await loop.run(query, context, working_dir=work_dir, session_id=session_id)
 
     print(f"[RLM:DONE] Completed in {result.iterations} iterations")
     print(f"[RLM:DONE] Tokens: {result.tokens_used}, Time: {result.execution_time_ms:.0f}ms")
