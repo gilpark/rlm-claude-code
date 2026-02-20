@@ -83,8 +83,19 @@ Use Bash to run the Python script with the composed prompt:
 
 ```bash
 cd ${CLAUDE_PLUGIN_ROOT}
-uv run python scripts/run_orchestrator.py --verbose "<composed prompt>"
+
+# Get session ID from coordination file if available
+SESSION_ID=$(cat ~/.claude/rlm-frames/.current_session 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('session_id',''))" 2>/dev/null || echo "")
+
+# Run orchestrator
+if [ -n "$SESSION_ID" ]; then
+  uv run python scripts/run_orchestrator.py --verbose --session-id "$SESSION_ID" "<composed prompt>"
+else
+  uv run python scripts/run_orchestrator.py --verbose "<composed prompt>"
+fi
 ```
+
+The orchestrator will use the session_id from the coordination file if available, ensuring frames are saved to the same folder as tool outputs.
 
 ### Step 4: Report Answer
 
