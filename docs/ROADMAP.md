@@ -6,19 +6,19 @@ Future development plans for the CausalFrame plugin.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  NOW: Phase 17 → Phase 18 → Phase 19                       │
-│  ContextMap    Tree/Evidence   UX                           │
+│  NOW: Phase 18 → Phase 19                                   │
+│  Tree/Evidence   UX                                         │
 ├─────────────────────────────────────────────────────────────┤
-│  LATER: Phase 9 → Phase 10 → Phase 15 → Phase 16           │
-│  Living Docs   Simplification  Performance   Advanced REPL  │
+│  NEXT: Phase 20 → Phase 9 → Phase 15                        │
+│  Multi-Repo   Living Docs   Performance                     │
 ├─────────────────────────────────────────────────────────────┤
-│  BACKLOG: Visual viewer, export formats, cross-session      │
+│  BACKLOG: Visual viewer, export formats, reference dirs     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Phase 17: ContextMap + Git-Aware Loading
+## Phase 17: ContextMap + Git-Aware Loading ✓
 
 **Priority: HIGH** — Foundational for spatial externalization and cross-session invalidation.
 
@@ -26,11 +26,11 @@ Externalize context so REPL navigates instead of reading files directly.
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Create `src/context_map.py` | Minimal ContextMap class (paths, hashes, lazy contents) | Not Started |
-| Modify `repl_environment.py` | REPL uses ContextMap instead of direct file reads | Not Started |
-| Add `commit_hash` to FrameIndex | Store git HEAD at session start | Not Started |
-| Git diff at frame load | Detect changed files when loading old frames | Not Started |
-| Update PostToolUse hook | Refresh ContextMap after Write/Edit | Not Started |
+| Create `src/frame/context_map.py` | Minimal ContextMap class (paths, hashes, lazy contents) | ✅ Complete |
+| Modify `repl_environment.py` | REPL uses ContextMap instead of direct file reads | ✅ Complete |
+| Add `commit_hash` to FrameIndex | Store git HEAD at session start | ✅ Complete |
+| Git diff at frame load | Detect changed files when loading old frames | ✅ Complete |
+| Dynamic discovery + security guard | Auto-add files within root, reject outside | ✅ Complete |
 
 **Goal:** REPL becomes a navigator of externalized context, not a file-system reader. Cross-session change detection via git diff.
 
@@ -69,6 +69,24 @@ Transform linear chain into proper tree structure with evidence tracking.
 | Surface invalidated frames | Auto-show invalidated frames on session start | Not Started |
 
 **Goal:** Model actively navigates causal store, not just passive persistence.
+
+---
+
+## Phase 20: Cross-Repository Delegation
+
+**Priority: MEDIUM** — Enable multi-repo awareness without scope leakage.
+
+When the agent needs to reference code in a related/sibling repo:
+
+| Task | Description | Status |
+|------|-------------|--------|
+| Sub-agent spawning | Spawn sub-RLM agent scoped to target repo directory | Not Started |
+| Result delegation | Return result as evidence in child CausalFrame | Not Started |
+| Independent invalidation | Sub-agent gets own ContextMap + commit_hash | Not Started |
+| Reference roots flag | `--reference-dir ../utils` for read-only external paths | Not Started |
+| Restrictiveness toggle | User-configurable strict vs. dynamic discovery | Not Started |
+
+**Goal:** Keep main agent's scope clean while enabling multi-repo awareness.
 
 ---
 
@@ -168,3 +186,4 @@ For historical reference, see [CHANGELOG.md](./CHANGELOG.md).
 - Phase 12: Fix RLM orchestrator hallucination ✓
 - Phase 13: Claude Code Runtime Integration ✓ (2026-02-20)
 - Phase 14: Enhanced Verification ✓ (2026-02-20)
+- Phase 17: ContextMap + Git-Aware Loading ✓ (2026-02-20)
