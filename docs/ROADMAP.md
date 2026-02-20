@@ -38,11 +38,21 @@ Externalize context so REPL navigates instead of reading files directly.
 
 ---
 
-## Phase 18: Tree Structure + Evidence + Cascade
+## Phase 18: Tree Structure + Evidence + Cascade + Recursion
 
 **Priority: HIGH** — Core gaps identified in code review feedback.
 
-Transform linear chain into proper tree structure with evidence tracking.
+Transform linear chain into proper tree structure with evidence tracking AND enable working recursion via synchronous `llm(sub_query)`.
+
+### Part A: Recursion Infrastructure
+
+| Task | Description | Status |
+|------|-------------|--------|
+| Synchronous `llm(sub_query)` | Creates child frames, proper depth tracking (no subprocess) | Not Started |
+| Enhanced system prompt | Explicit recursion guidance with examples | Not Started |
+| Query/intent tracking | `initial_query` and `query_summary` in FrameIndex | Not Started |
+
+### Part B: Tree Structure + Evidence + Cascade
 
 | Task | Description | Status |
 |------|-------------|--------|
@@ -52,7 +62,12 @@ Transform linear chain into proper tree structure with evidence tracking.
 | Stronger cascade propagation | Recurse children + evidence consumers on invalidation | Not Started |
 | `find_dependent_frames()` method | Scan frames for evidence references | Not Started |
 
-**Goal:** Proper tree structure with cascade invalidation when premises change.
+**Key Design Decision:** Use synchronous `llm(sub_query)` instead of subprocess.
+- Simpler, faster, no IPC overhead
+- Fits RLM ethos (recursive calls in same process)
+- Subprocess can be future work for isolation if needed
+
+**Goal:** Proper tree structure with working recursion and cascade invalidation when premises change.
 
 **Plan:** [2026-02-20-phase-18-tree-evidence.md](./plans/2026-02-20-phase-18-tree-evidence.md)
 
