@@ -11,41 +11,38 @@ import sys
 from pathlib import Path
 
 # Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.session.session_comparison import compare_sessions
-from src.session.session_artifacts import SessionArtifacts, FileRecord
-from src.frame.frame_store import FrameStore
+from session.session_comparison import compare_sessions
+from session.session_artifacts import SessionArtifacts
+from frame.frame_index import FrameIndex
 
 
-def load_prior_session(session_id: str) -> SessionArtifacts | None:
-    """Load prior session artifacts if they exist."""
-    artifacts_path = Path.home() / ".claude" / "rlm-frames" / session_id / "artifacts.json"
+def find_most_recent_session(current_session_id: str) -> str | None:
+    """Find the most recent session (excluding current)."""
+    frames_dir = Path.home() / ".claude" / "rlm-frames"
 
-    if not artifacts_path.exists():
+    if not frames_dir.exists():
         return None
 
-    with open(artifacts_path) as f:
-        data = json.load(f)
+    sessions = []
+    for session_dir in frames_dir.iterdir():
+        if session_dir.is_dir() and session_dir.name != current_session_id:
+            artifacts_path = session_dir / "artifacts.json"
+            if artifacts_path.exists():
+                sessions.append((session_dir.name, artifacts_path.stat().st_mtime))
 
-    # Reconstruct FileRecord dict
-    files = {
-        path: FileRecord(path=path, hash=rec["hash"], role=rec["role"])
-        for path, rec in data.get("files", {}).items()
-    }
+    if not sessions:
+        return None
 
-    return SessionArtifacts(
-        session_id=data["session_id"],
-        initial_prompt=data.get("initial_prompt", ""),
-        files=files,
-        root_frame_id=data.get("root_frame_id", ""),
-        conversation_log=data.get("conversation_log", ""),
-    )
+    # Sort by modification time, most recent first
+    sessions.sort(key=lambda x: x[1], reverse=True)
+    return sessions[0][0]
 
 
 def main():
     """Main entry point for hook."""
-    # Read hook input from stdin to get session_id
+    # Read hook input from stdin
     hook_data = {}
     try:
         stdin_data = sys.stdin.read().strip()
@@ -55,32 +52,25 @@ def main():
         pass
 
     session_id = hook_data.get("session_id", "unknown")
-    transcript_path = hook_data.get("transcript_path", "")
 
-    # Get prior session ID from transcript path (parent session)
-    # If no transcript path, look for most recent session in rlm-frames
-    prior_session_id = None
-    if transcript_path:
-        # Could extract prior session from transcript
-        pass
+    # Find prior session
+    prior_session_id = find_most_recent_session(session_id)
 
     if not prior_session_id:
-        # Fall back to environment variable for testing
-        prior_session_id = os.environ.get("CLAUDE_PRIOR_SESSION_ID")
-
-    if not prior_session_id:
-        print("No prior session to compare")
+        print(json.dumps({"status": "no_prior_session", "session_id": session_id}))
         sys.exit(0)
 
-    # Load prior session
-    prior = load_prior_session(prior_session_id)
+    # Load prior session artifacts
+    prior = SessionArtifacts.load(prior_session_id)
 
     if not prior:
-        print(f"Could not load prior session: {prior_session_id}")
+        print(json.dumps({"status": "no_prior_artifacts", "prior_session_id": prior_session_id}))
         sys.exit(0)
 
-    # Create current session from environment/args
-    # This is a placeholder - real implementation would get actual file info
+    # Load prior frame index
+    prior_index = FrameIndex.load(prior_session_id)
+
+    # Create current session (placeholder - real data comes from Claude Code)
     current = SessionArtifacts(
         session_id=session_id,
         initial_prompt=os.environ.get("CLAUDE_PROMPT", ""),
@@ -89,11 +79,13 @@ def main():
         conversation_log="",
     )
 
-    # Compare
-    diff = compare_sessions(current, prior)
+    # Compare sessions
+    diff = compare_sessions(current, prior, index=prior_index)
 
-    # Output results for Claude to see
+    # Output results
     output = {
+        "status": "compared",
+        "prior_session_id": prior_session_id,
         "same_task": diff.same_task,
         "changed_files": diff.changed_files,
         "invalidated_frames": diff.invalidated_frame_ids,
