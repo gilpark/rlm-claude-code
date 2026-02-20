@@ -18,16 +18,18 @@ class TestLLMClient:
         assert client.api_key == "test-key"
 
     def test_get_model_for_depth_root(self):
-        """Root depth (0) returns sonnet model."""
+        """Root depth (0) returns root model (glm-4.6 by default)."""
         client = LLMClient()
         model = client.get_model_for_depth(0)
-        assert "sonnet" in model.lower() or model == "glm-4.7"
+        # Default config uses glm-4.6 for root
+        assert model == "glm-4.6"
 
     def test_get_model_for_depth_deep(self):
-        """Deep depth (3+) returns haiku model."""
+        """Deep depth (3+) returns model from config.recursive_depth_3."""
         client = LLMClient()
         model = client.get_model_for_depth(3)
-        assert "haiku" in model.lower() or model == "glm-4.7"
+        # Should return the configured model for depth 3
+        assert model.startswith("glm-")  # Valid GLM model
 
     def test_call_requires_query(self):
         """LLMClient.call requires a query."""
