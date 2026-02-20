@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import anthropic
+
+if TYPE_CHECKING:
+    from .config import RLMConfig
 
 
 class LLMError(Exception):
@@ -23,35 +26,28 @@ class LLMClient:
     Provider-agnostic LLM client.
 
     Simple synchronous interface for REPL's llm() function.
-    Default model cascade: root uses larger model, sub-calls use smaller.
+    Reads model and temperature settings from RLMConfig.
 
     Temperature is set LOW (0.1) by default for deterministic REPL output.
     REPL tasks don't need creativity - they need accuracy.
     """
 
     api_key: str | None = None
-    default_model: str = "glm-5"
     base_url: str | None = None
-    # Low temperature for deterministic REPL output (not creative)
-    # 0.0-0.3 = deterministic, 0.4-0.7 = balanced, 0.8-1.0 = creative
-    temperature: float = 0.1
-    model_cascade: dict[int, str] = field(default_factory=lambda: {
-        0: "glm-5",  # root - best accuracy
-        1: "glm-5",  # depth 1
-        2: "glm-4.7",  # depth 2+ - cheaper
-        3: "glm-4.7",
-    })
+    config: "RLMConfig | None" = None
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
 
     def __post_init__(self):
-        """Initialize API key from environment if not provided."""
+        """Initialize from environment and config."""
         if self.api_key is None:
             self.api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         if self.base_url is None:
             self.base_url = os.environ.get("ANTHROPIC_BASE_URL")
-        # Allow temperature override via env var
-        if "ANTHROPIC_TEMPERATURE" in os.environ:
-            self.temperature = float(os.environ["ANTHROPIC_TEMPERATURE"])
+
+        # Load config if not provided
+        if self.config is None:
+            from .config import RLMConfig
+            self.config = RLMConfig.load()
 
     def _get_client(self) -> anthropic.Anthropic:
         """Get or create Anthropic client."""
@@ -66,7 +62,7 @@ class LLMClient:
 
     def get_model_for_depth(self, depth: int) -> str:
         """
-        Get appropriate model for recursion depth.
+        Get appropriate model for recursion depth from config.
 
         Args:
             depth: Current recursion depth (0 = root)
@@ -74,18 +70,37 @@ class LLMClient:
         Returns:
             Model identifier string
         """
-        # Check for custom model env vars
-        sonnet_model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", self.default_model)
-        haiku_model = os.environ.get("ANTHROPIC_DEFAULT_HAIKU_MODEL", self.default_model)
+        # Environment variable override (highest priority)
+        env_model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        if env_model:
+            return env_model
 
-        # Route to cheaper models at deeper depths
-        depth_model_map = {
-            0: sonnet_model,
-            1: sonnet_model,
-            2: haiku_model,
-            3: haiku_model,
-        }
-        return depth_model_map.get(depth, haiku_model)
+        # Use config
+        if self.config:
+            models = self.config.models
+            depth_model_map = {
+                0: models.root_model,
+                1: models.recursive_depth_1,
+                2: models.recursive_depth_2,
+                3: models.recursive_depth_3,
+            }
+            return depth_model_map.get(depth, models.recursive_depth_3)
+
+        # Fallback
+        return "glm-4.6"
+
+    def get_temperature(self) -> float:
+        """Get temperature from config or env override."""
+        # Environment variable override
+        if "ANTHROPIC_TEMPERATURE" in os.environ:
+            return float(os.environ["ANTHROPIC_TEMPERATURE"])
+
+        # Use config
+        if self.config:
+            return self.config.models.temperature
+
+        # Fallback
+        return 0.1
 
     def call(
         self,
@@ -103,11 +118,11 @@ class LLMClient:
         Args:
             query: The query/prompt string
             context: Optional context dict (files, prior_results, etc.)
-            model: Optional model override (None = use default for depth)
+            model: Optional model override (None = use config default for depth)
             depth: Current recursion depth for model selection
             max_tokens: Maximum tokens in response
             system: Optional system prompt
-            temperature: Optional temperature override (None = use self.temperature)
+            temperature: Optional temperature override (None = use config)
 
         Returns:
             LLM response as string
@@ -122,8 +137,8 @@ class LLMClient:
         # Select model
         selected_model = model if model else self.get_model_for_depth(depth)
 
-        # Use provided temperature or default
-        temp = temperature if temperature is not None else self.temperature
+        # Use provided temperature or config default
+        temp = temperature if temperature is not None else self.get_temperature()
 
         # Build full prompt with context
         full_prompt = self._build_prompt(query, context)
@@ -167,7 +182,7 @@ class LLMClient:
                 "model": model,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,  # Low for deterministic REPL output
+                "temperature": temperature,
             }
 
             if system:

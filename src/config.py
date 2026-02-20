@@ -110,9 +110,16 @@ class TrajectoryConfig:
 class ModelConfig:
     """Configuration for model selection by depth."""
 
-    root_model: str = "opus"  # Default to Opus
-    recursive_depth_1: str = "sonnet"
-    recursive_depth_2: str = "haiku"
+    # Primary models (GLM via Anthropic-compatible API)
+    root_model: str = "glm-4.6"  # Best accuracy + speed (100%, 3.1s avg)
+    recursive_depth_1: str = "glm-4.6"  # Same as root for consistency
+    recursive_depth_2: str = "glm-4.7"  # Cheaper for deep recursion
+    recursive_depth_3: str = "glm-4.7"  # Cheapest for deepest
+
+    # Temperature for REPL (low = deterministic, high = creative)
+    # 0.0-0.3 = deterministic, 0.4-0.7 = balanced, 0.8-1.0 = creative
+    temperature: float = 0.1  # Low for accurate REPL output
+
     # Alternative models for OpenAI routing
     openai_root: str = "gpt-5.2-codex"
     openai_recursive: str = "gpt-4o-mini"
