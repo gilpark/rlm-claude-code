@@ -89,6 +89,7 @@ class RLAPHLoop:
         config: RLMConfig | None = None,
         llm_client: LLMClient | None = None,
         context_map: ContextMap | None = None,
+        verbose: bool = False,
     ):
         """
         Initialize RLAPH loop.
@@ -99,12 +100,14 @@ class RLAPHLoop:
             config: RLM configuration
             llm_client: LLM client for API calls
             context_map: Optional ContextMap for externalized file access (SPEC-17)
+            verbose: Enable verbose logging for recursion decisions
         """
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.config = config or default_config
         self.llm_client = llm_client or LLMClient()
         self._context_map = context_map
+        self._verbose = verbose
 
         # State
         self.repl: RLMEnvironment | None = None
@@ -371,7 +374,7 @@ class RLAPHLoop:
             history=self.history.copy(),
         )
 
-    def llm_sync(self, query: str, context: str = "") -> str:
+    def llm_sync(self, query: str, context: str = "", depth: int | None = None) -> str:
         """
         Synchronous LLM call - returns actual result immediately.
 
@@ -379,10 +382,12 @@ class RLAPHLoop:
         - Called from REPL's llm() function
         - Returns actual string result
         - Handles depth management
+        - Creates child frames with explicit depth parameter
 
         Args:
             query: Query string
             context: Optional context string
+            depth: Explicit depth for this call (None = current_depth + 1)
 
         Returns:
             LLM response as string
@@ -390,16 +395,57 @@ class RLAPHLoop:
         Raises:
             RecursionDepthError: If max depth exceeded
         """
-        # Check depth
-        if self._depth >= self.max_depth:
-            raise RecursionDepthError(self._depth + 1, self.max_depth)
+        # Calculate depth explicitly (don't mutate self._depth)
+        current_depth = depth if depth is not None else self._depth + 1
+
+        # Check depth limit
+        if current_depth > self.max_depth:
+            raise RecursionDepthError(current_depth, self.max_depth)
+
+        # Verbose logging for recursion decisions
+        if self._verbose:
+            print(f"[RLM] Recursion at depth {current_depth}: {query[:80]}...")
 
         # Use LLMClient directly for v2
-        return self.llm_client.call(
+        result = self.llm_client.call(
             query=query,
             context={"prior": context} if context else None,
-            depth=self._depth + 1,
+            depth=current_depth,
         )
+
+        # Create child frame for this llm call
+        context_slice = ContextSlice(
+            files={},  # No files read at llm call level
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=self.config.cost_controls.max_tokens_per_recursive_call,
+        )
+
+        child_frame = CausalFrame(
+            frame_id=compute_frame_id(
+                self._current_frame_id,
+                query[:100],  # Use query snippet as identifier
+                context_slice,
+            ),
+            depth=current_depth,
+            parent_id=self._current_frame_id,
+            children=[],
+            query=query[:200],
+            context_slice=context_slice,
+            evidence=self._collect_evidence(),
+            conclusion=result[:500] if result else None,
+            confidence=0.8,  # Default, can be updated
+            invalidation_condition="",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+        self.frame_index.add(child_frame)
+
+        return result
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with REPL instructions."""
