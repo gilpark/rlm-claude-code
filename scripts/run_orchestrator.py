@@ -44,12 +44,44 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 import warnings
 from pathlib import Path
 from typing import Any
 
 # Suppress third-party deprecation warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
+
+
+def get_or_create_session_id(explicit_id: str | None = None) -> str:
+    """
+    Get session ID from various sources in priority order:
+    1. Explicit argument (--session-id)
+    2. Environment variable (CLAUDE_SESSION_ID)
+    3. Coordination file (~/.claude/rlm-frames/.current_session)
+    4. Generate new UUID[:8]
+    """
+    # 1. Explicit argument
+    if explicit_id:
+        return explicit_id
+
+    # 2. Environment variable
+    env_id = os.environ.get("CLAUDE_SESSION_ID")
+    if env_id:
+        return env_id
+
+    # 3. Coordination file
+    session_file = Path.home() / ".claude" / "rlm-frames" / ".current_session"
+    if session_file.exists():
+        try:
+            data = json.loads(session_file.read_text())
+            if data.get("session_id"):
+                return data["session_id"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # 4. Generate new
+    return str(uuid.uuid4())[:8]
 
 
 def get_state_dir() -> Path:
@@ -333,10 +365,11 @@ Examples:
     # Determine working directory (project root)
     plugin_root = Path(__file__).parent.parent
 
-    # Get session_id from argument or environment or generate
-    session_id = args.session_id
-    if session_id is None:
-        session_id = os.environ.get("CLAUDE_SESSION_ID")
+    # Get session ID from coordination file or explicit argument
+    session_id = get_or_create_session_id(args.session_id)
+
+    if args.verbose:
+        print(f"[RLM:SESSION] Using session_id: {session_id}")
 
     # Run RLAPH loop (clean synchronous llm() mode)
     try:
