@@ -9,7 +9,6 @@ persisted to the FrameStore for long-term storage.
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -18,6 +17,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from frame.frame_store import FrameStore
 from frame.frame_index import FrameIndex
+
+
+def get_session_id_for_frames(hook_session_id: str) -> str:
+    """
+    Get the session ID that frames were saved with.
+
+    Priority:
+    1. Coordination file (set by orchestrator or capture_output)
+    2. Hook input session_id
+    3. "default"
+    """
+    # Check coordination file first
+    session_file = Path.home() / ".claude" / "rlm-frames" / ".current_session"
+    if session_file.exists():
+        try:
+            data = json.loads(session_file.read_text())
+            if data.get("session_id"):
+                return data["session_id"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return hook_session_id or "default"
 
 
 def extract_frames(session_id: str) -> dict:
@@ -66,14 +87,16 @@ def main():
     except json.JSONDecodeError:
         pass
 
-    session_id = hook_data.get("session_id", os.environ.get("CLAUDE_SESSION_ID", "default"))
+    hook_session_id = hook_data.get("session_id", "default")
+
+    # Get the session ID that frames were saved with
+    session_id = get_session_id_for_frames(hook_session_id)
 
     # Extract and persist frames
     result = extract_frames(session_id)
 
-    # Output result for debugging
+    # Output result
     print(json.dumps(result))
-
     sys.exit(0)
 
 
