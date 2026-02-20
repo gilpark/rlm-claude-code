@@ -239,15 +239,18 @@ async def run_rlaph(
     """
     from src.repl.rlaph_loop import RLAPHLoop
 
+    print("[RLM:START] Initializing RLAPH loop")
+
     # Build empty context - files are read by REPL as needed
     context_data = build_context(files={}, use_disk_fallback=False)
     context = build_session_context(context_data)
 
     if verbose:
-        print(f"[RLAPH] Starting loop with query ({len(query)} chars)")
-        print(f"[RLAPH] Max depth: {depth}")
+        print(f"[RLM:CONFIG] Max depth: {depth}")
         if working_dir:
-            print(f"[RLAPH] Working dir: {working_dir}")
+            print(f"[RLM:CONFIG] Working dir: {working_dir}")
+
+    print(f"[RLM:QUERY] Processing ({len(query)} chars)")
 
     # Create RLAPH loop (no renderer in v2 - verbose handled internally)
     loop = RLAPHLoop(
@@ -258,10 +261,8 @@ async def run_rlaph(
     # Run loop
     result = await loop.run(query, context, working_dir=working_dir)
 
-    if verbose:
-        print(f"[RLAPH] Completed in {result.iterations} iterations")
-        print(f"[RLAPH] Tokens used: {result.tokens_used}")
-        print(f"[RLAPH] Execution time: {result.execution_time_ms:.0f}ms")
+    print(f"[RLM:DONE] Completed in {result.iterations} iterations")
+    print(f"[RLM:DONE] Tokens: {result.tokens_used}, Time: {result.execution_time_ms:.0f}ms")
 
     return result.answer
 
