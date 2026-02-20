@@ -23,23 +23,44 @@ def test_repl_uses_context_map_for_read_file(tmp_path):
     assert "hello" in result
 
 
-def test_repl_rejects_file_not_in_context_map(tmp_path):
-    """RLMEnvironment should reject files not in ContextMap."""
-    unknown_file = tmp_path / "unknown.py"
-    unknown_file.write_text("unknown")
+def test_repl_rejects_file_outside_root(tmp_path):
+    """RLMEnvironment should reject files outside working directory (security guard)."""
+    # Create a file outside the root
+    outside_file = tmp_path.parent / "outside_repl_test.py"
+    outside_file.write_text("outside content")
+
+    try:
+        cm = ContextMap(tmp_path)
+
+        context = SessionContext(messages=[], files={}, tool_outputs=[], working_memory={})
+        env = RLMEnvironment(context, context_map=cm)
+        env.enable_file_access(tmp_path)
+
+        # Should raise error for file outside root
+        with pytest.raises(FileNotFoundError) as exc_info:
+            env._read_file(str(outside_file))
+
+        assert "outside" in str(exc_info.value).lower()
+    finally:
+        outside_file.unlink()
+
+
+def test_repl_auto_discovers_new_files(tmp_path):
+    """RLMEnvironment should auto-discover new files within root (dynamic discovery)."""
+    # Create a new file after ContextMap was created
+    new_file = tmp_path / "auto_discovered.py"
+    new_file.write_text("auto discovered content")
 
     cm = ContextMap(tmp_path)
-    # Don't add unknown_file to paths
+    # Don't manually add to paths - should be auto-discovered
 
     context = SessionContext(messages=[], files={}, tool_outputs=[], working_memory={})
     env = RLMEnvironment(context, context_map=cm)
     env.enable_file_access(tmp_path)
 
-    # Should raise error for file not in context
-    with pytest.raises(FileNotFoundError) as exc_info:
-        env._read_file("unknown.py")
-
-    assert "not in context" in str(exc_info.value).lower()
+    # Should work without manual add_path (dynamic discovery)
+    result = env._read_file("auto_discovered.py")
+    assert "auto discovered content" in result
 
 
 def test_repl_context_map_tracks_files_read(tmp_path):

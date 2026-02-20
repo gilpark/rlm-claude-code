@@ -24,15 +24,16 @@ def test_get_content_loads_lazily(tmp_path):
     test_file.write_text("print('hello')")
 
     cm = ContextMap(tmp_path)
-    cm.paths.add(test_file)
 
     # Content not loaded yet
     assert test_file not in cm.contents
 
-    # Load it
+    # Load it (auto-discovers since within root)
     content = cm.get_content(test_file)
     assert content == "print('hello')"
     assert test_file in cm.contents
+    # Auto-added to paths
+    assert test_file in cm.paths
 
 
 def test_get_content_caches_result(tmp_path):
@@ -41,7 +42,6 @@ def test_get_content_caches_result(tmp_path):
     test_file.write_text("original")
 
     cm = ContextMap(tmp_path)
-    cm.paths.add(test_file)
 
     content1 = cm.get_content(test_file)
 
@@ -53,15 +53,43 @@ def test_get_content_caches_result(tmp_path):
     assert content2 == "original"
 
 
-def test_get_content_rejects_unknown_path(tmp_path):
-    """get_content should raise for paths not in context."""
+def test_get_content_rejects_path_outside_root(tmp_path):
+    """get_content should reject paths outside working directory (security guard)."""
     cm = ContextMap(tmp_path)
 
-    unknown_file = tmp_path / "unknown.py"
-    unknown_file.write_text("unknown")
+    # Create a file outside the root
+    outside_file = tmp_path.parent / "outside_test.py"
+    outside_file.write_text("outside")
 
-    with pytest.raises(ValueError, match="not in context"):
-        cm.get_content(unknown_file)
+    try:
+        with pytest.raises(ValueError, match="outside working directory"):
+            cm.get_content(outside_file)
+    finally:
+        outside_file.unlink()
+
+
+def test_get_content_rejects_nonexistent_file(tmp_path):
+    """get_content should raise for files that don't exist."""
+    cm = ContextMap(tmp_path)
+
+    with pytest.raises(ValueError, match="File not found"):
+        cm.get_content(tmp_path / "nonexistent.py")
+
+
+def test_get_content_auto_discovers_new_files(tmp_path):
+    """get_content should auto-add new files created within root (dynamic discovery)."""
+    cm = ContextMap(tmp_path)
+
+    # Create a new file after ContextMap was created
+    new_file = tmp_path / "new_file.py"
+    new_file.write_text("# new content")
+
+    # Should work without manual add_path
+    content = cm.get_content(new_file)
+    assert content == "# new content"
+
+    # Should be added to paths
+    assert new_file in cm.paths
 
 
 def test_get_hash_computes_and_caches(tmp_path):
@@ -70,7 +98,6 @@ def test_get_hash_computes_and_caches(tmp_path):
     test_file.write_text("test content")
 
     cm = ContextMap(tmp_path)
-    cm.paths.add(test_file)
 
     hash1 = cm.get_hash(test_file)
     assert len(hash1) == 16  # blake2b truncated

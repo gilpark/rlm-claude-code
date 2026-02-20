@@ -76,6 +76,9 @@ class ContextMap:
         """
         Get file content, loading lazily if needed.
 
+        Security: Rejects paths outside self.root (working directory).
+        Dynamic discovery: Auto-adds files that exist within root.
+
         Args:
             path: File path (relative to root or absolute)
 
@@ -83,7 +86,7 @@ class ContextMap:
             File content as string
 
         Raises:
-            ValueError: If path not in context
+            ValueError: If path outside root or doesn't exist
         """
         p = Path(path) if not isinstance(path, Path) else path
         if not p.is_absolute():
@@ -91,8 +94,21 @@ class ContextMap:
 
         p = p.resolve()
 
+        # Security guard: reject paths outside root
+        try:
+            p.relative_to(self.root)
+        except ValueError:
+            raise ValueError(f"Path outside working directory: {path}")
+
+        # Check if file exists
+        if not p.exists():
+            raise ValueError(f"File not found: {path}")
+        if not p.is_file():
+            raise ValueError(f"Not a file: {path}")
+
+        # Dynamic discovery: auto-add to paths if within root
         if p not in self.paths:
-            raise ValueError(f"Path not in context: {path}")
+            self.paths.add(p)
 
         if p not in self.contents:
             self.contents[p] = p.read_text(encoding="utf-8", errors="replace")
