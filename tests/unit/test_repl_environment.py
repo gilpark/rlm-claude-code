@@ -20,14 +20,24 @@ class TestAsyncFileIO:
     def env_with_files(self, tmp_path):
         """Create environment with test files."""
         # Create test files
-        (tmp_path / "file1.py").write_text("print('file1')")
-        (tmp_path / "file2.py").write_text("print('file2')")
-        (tmp_path / "file3.py").write_text("print('file3')")
+        file1 = tmp_path / "file1.py"
+        file2 = tmp_path / "file2.py"
+        file3 = tmp_path / "file3.py"
+        file1.write_text("print('file1')")
+        file2.write_text("print('file2')")
+        file3.write_text("print('file3')")
 
         # Create environment
         context = SessionContext(messages=[], files={}, tool_outputs=[], working_memory={})
         env = RLMEnvironment(context)
         env.enable_file_access(working_dir=tmp_path)
+
+        # Add files to ContextMap (since tmp_path isn't a git repo)
+        if env._context_map is not None:
+            env._context_map.add_path(file1)
+            env._context_map.add_path(file2)
+            env._context_map.add_path(file3)
+
         return env, tmp_path
 
     @pytest.mark.asyncio

@@ -60,6 +60,7 @@ MICRO_MODE_BLOCKED = frozenset(
 )
 
 if TYPE_CHECKING:
+    from ..frame.context_map import ContextMap
     from .cell_manager import CellManager
     from .llm_client import LLMClient
     from .tool_bridge import ToolBridge
@@ -127,6 +128,7 @@ class RLMEnvironment:
         llm_client: LLMClient | None = None,
         use_restricted: bool = True,
         access_level: REPLAccessLevel = "standard",
+        context_map: "ContextMap | None" = None,
     ):
         """
         Initialize REPL environment with context.
@@ -139,6 +141,7 @@ class RLMEnvironment:
                           - "micro": SPEC-14.03 restricted functions only
                           - "standard": All REPL functions except tool access
                           - "full": All REPL functions including tool access
+            context_map: Optional ContextMap for externalized file access (SPEC-17)
 
         Implements: Spec §4.1 Sandbox Architecture
         Implements: Spec SPEC-14.03-14.04 for micro mode
@@ -210,6 +213,7 @@ class RLMEnvironment:
         # Tool bridge for file access (initialized via enable_file_access())
         self._tool_bridge: ToolBridge | None = None
         self._working_dir: Path | None = None
+        self._context_map: "ContextMap | None" = context_map  # Externalized context (SPEC-17)
 
         # Tracking for CausalFrame ContextSlice creation (SPEC-17)
         self.files_read: dict[str, str] = {}  # path -> content_hash
@@ -1708,6 +1712,12 @@ class RLMEnvironment:
         """
         self._working_dir = Path(working_dir) if working_dir else Path.cwd()
 
+        # Create ContextMap if not provided (for externalized context access)
+        if self._context_map is None:
+            from ..frame.context_map import ContextMap
+
+            self._context_map = ContextMap(self._working_dir)
+
         if tool_bridge:
             self._tool_bridge = tool_bridge
         else:
@@ -2113,7 +2123,7 @@ class RLMEnvironment:
 
         Raises:
             RuntimeError: If file access not enabled
-            FileNotFoundError: If file doesn't exist
+            FileNotFoundError: If file doesn't exist or not in context map
 
         Example:
             # Read entire file
@@ -2131,6 +2141,36 @@ class RLMEnvironment:
         if self._tool_bridge is None:
             raise RuntimeError("File access not enabled. Call enable_file_access() first.")
 
+        # Resolve to absolute path for consistent tracking
+        if self._working_dir and not Path(path).is_absolute():
+            abs_path = (self._working_dir / path).resolve()
+        else:
+            abs_path = Path(path).resolve()
+
+        # Use ContextMap if available (enforces context scope)
+        if self._context_map is not None:
+            try:
+                content = self._context_map.get_content(path)
+            except ValueError as e:
+                raise FileNotFoundError(f"Failed to read {path}: {e}") from e
+
+            # Apply offset/limit to the content
+            lines = content.splitlines()
+            if offset > 0 or limit < len(lines):
+                selected_lines = lines[offset : offset + limit]
+                content = "\n".join(selected_lines)
+
+            # Track file read for CausalFrame ContextSlice (SPEC-17)
+            content_hash = _hashlib.sha256(content.encode()).hexdigest()[:16]
+            self.files_read[str(abs_path)] = content_hash
+
+            # Cache in files dict for later access
+            if path not in self.globals["files"]:
+                self.globals["files"][path] = content
+
+            return content
+
+        # Fallback: Use tool bridge (legacy behavior)
         result = self._tool_bridge.tool_call("read", path, offset=offset, limit=limit)
 
         if not result.success:
@@ -2138,12 +2178,7 @@ class RLMEnvironment:
 
         # Track file read for CausalFrame ContextSlice (SPEC-17)
         content_hash = _hashlib.sha256(result.output.encode()).hexdigest()[:16]
-        # Resolve to absolute path for consistent tracking
-        if self._working_dir and not Path(path).is_absolute():
-            abs_path = str((self._working_dir / path).resolve())
-        else:
-            abs_path = str(Path(path).resolve())
-        self.files_read[abs_path] = content_hash
+        self.files_read[str(abs_path)] = content_hash
 
         # Cache in files dict for later access
         if path not in self.globals["files"]:
