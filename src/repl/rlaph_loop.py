@@ -185,11 +185,12 @@ class RLAPHLoop:
             depth=self._depth,
         )
 
-        # Initialize REPL with LLM client and ContextMap for v2
+        # Initialize REPL with LLM client, ContextMap, and loop reference for v2
         self.repl = RLMEnvironment(
             context,
             llm_client=self.llm_client,
             context_map=self._context_map,
+            loop=self,  # Phase 18 A1: Pass loop for llm_sync integration
         )
 
         # Enable file access for context externalization

@@ -129,6 +129,7 @@ class RLMEnvironment:
         use_restricted: bool = True,
         access_level: REPLAccessLevel = "standard",
         context_map: "ContextMap | None" = None,
+        loop: Any = None,  # RLAPHLoop instance for llm_sync integration
     ):
         """
         Initialize REPL environment with context.
@@ -142,6 +143,7 @@ class RLMEnvironment:
                           - "standard": All REPL functions except tool access
                           - "full": All REPL functions including tool access
             context_map: Optional ContextMap for externalized file access (SPEC-17)
+            loop: Optional RLAPHLoop instance for llm_sync integration (Phase 18 A1)
 
         Implements: Spec §4.1 Sandbox Architecture
         Implements: Spec SPEC-14.03-14.04 for micro mode
@@ -150,6 +152,7 @@ class RLMEnvironment:
         self.llm_client = llm_client
         self.use_restricted = use_restricted
         self.access_level = access_level
+        self._loop = loop  # Store loop reference for llm_sync calls
 
         # Build safe builtins
         self._safe_builtins = self._build_safe_builtins()
@@ -826,19 +829,26 @@ class RLMEnvironment:
         query: str,
         context: Any = None,
         spawn_repl: bool = False,
+        depth: int | None = None,
     ) -> str:
         """
         Spawn a recursive sub-query - RLAPH style (synchronous).
 
         Implements: Spec §4.2 Recursive Call Implementation
+        Implements: Phase 18 Task A1 - Integration with RLAPHLoop.llm_sync
 
         RLAPH Mode: Returns actual result immediately instead of DeferredOperation.
         This allows LLM to use the result in the same code block.
 
+        Phase 18 A1 Integration:
+        - If self._loop is available, calls loop.llm_sync() to create child frames
+        - Otherwise falls back to direct LLMClient.call() (no frame tracking)
+
         Args:
             query: Query string for sub-call
             context: Context to pass to sub-call (optional)
-            spawn_repl: If True, child gets its own REPL
+            spawn_repl: If True, child gets its own REPL (not currently used)
+            depth: Explicit depth for this call (None = auto-increment, passed to llm_sync)
 
         Returns:
             LLM response as string (actual result, not deferred)
@@ -849,11 +859,16 @@ class RLMEnvironment:
         # Convert context to string if not None
         context_str = str(context)[:8000] if context is not None else ""
 
-        # v2: Use LLMClient for synchronous calls
+        # Phase 18 A1: Use loop.llm_sync for frame creation if available
+        if self._loop:
+            return self._loop.llm_sync(query, context=context_str, depth=depth)
+
+        # Fallback: Direct LLMClient call (no frame tracking)
+        # This is used when loop is not available (e.g., standalone REPL usage)
         if self.llm_client:
             return self.llm_client.call(query, context={"prior": context_str} if context_str else None)
 
-        # Fallback: Legacy deferred mode (for backward compatibility)
+        # Legacy deferred mode (for backward compatibility)
         # This path is kept for micro mode or when no handler is available
         self._operation_counter += 1
         op_id = f"rq_{self._operation_counter}"
