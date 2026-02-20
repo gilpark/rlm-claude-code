@@ -11,11 +11,11 @@ import sys
 from pathlib import Path
 
 # Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from session_comparison import compare_sessions
-from session_artifacts import SessionArtifacts, FileRecord
-from frame_store import FrameStore
+from src.session_comparison import compare_sessions
+from src.session_artifacts import SessionArtifacts, FileRecord
+from src.frame_store import FrameStore
 
 
 def load_prior_session(session_id: str) -> SessionArtifacts | None:
