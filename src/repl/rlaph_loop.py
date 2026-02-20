@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="RestrictedPyth
 
 from ..config import RLMConfig, default_config
 from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id
+from ..frame.context_map import ContextMap
 from ..frame.context_slice import ContextSlice
 from ..frame.frame_index import FrameIndex
 from ..types import RecursionDepthError, SessionContext
@@ -87,6 +88,7 @@ class RLAPHLoop:
         max_depth: int = 3,
         config: RLMConfig | None = None,
         llm_client: LLMClient | None = None,
+        context_map: ContextMap | None = None,
     ):
         """
         Initialize RLAPH loop.
@@ -96,11 +98,13 @@ class RLAPHLoop:
             max_depth: Maximum recursion depth for llm() calls
             config: RLM configuration
             llm_client: LLM client for API calls
+            context_map: Optional ContextMap for externalized file access (SPEC-17)
         """
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.config = config or default_config
         self.llm_client = llm_client or LLMClient()
+        self._context_map = context_map
 
         # State
         self.repl: RLMEnvironment | None = None
@@ -178,8 +182,12 @@ class RLAPHLoop:
             depth=self._depth,
         )
 
-        # Initialize REPL with LLM client for v2
-        self.repl = RLMEnvironment(context, llm_client=self.llm_client)
+        # Initialize REPL with LLM client and ContextMap for v2
+        self.repl = RLMEnvironment(
+            context,
+            llm_client=self.llm_client,
+            context_map=self._context_map,
+        )
 
         # Enable file access for context externalization
         # This is critical for RLM to handle large contexts:
