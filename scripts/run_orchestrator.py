@@ -323,6 +323,10 @@ async def run_rlaph(
     # Set commit_hash on frame index
     loop.frame_index.commit_hash = commit_hash
 
+    # Set initial query on frame index
+    loop.frame_index.initial_query = query
+    loop.frame_index.query_summary = query[:50] + ("..." if len(query) > 50 else "")
+
     # Run loop
     result = await loop.run(query, context, working_dir=work_dir, session_id=session_id)
 

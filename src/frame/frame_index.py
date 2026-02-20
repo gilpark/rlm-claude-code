@@ -168,6 +168,8 @@ class FrameIndex:
             data = json.load(f)
 
         index = cls()
+        index.initial_query = data.get("initial_query", "")
+        index.query_summary = data.get("query_summary", "")
         index.commit_hash = data.get("commit_hash")
         for frame_dict in data.get("frames", []):
             context_slice = ContextSlice(
