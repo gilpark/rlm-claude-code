@@ -19,7 +19,9 @@ from src.frame.frame_index import FrameIndex
 
 def extract_frames(session_id: str, index: FrameIndex) -> None:
     """Extract all frames from index and save to FrameStore."""
-    store_path = Path.home() / ".claude" / "rlm-frames" / f"{session_id}.jsonl"
+    session_dir = Path.home() / ".claude" / "rlm-frames" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    store_path = session_dir / "frames.jsonl"
     store = FrameStore(path=store_path)
 
     for frame in index.values():

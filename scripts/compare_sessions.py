@@ -20,7 +20,7 @@ from src.frame.frame_store import FrameStore
 
 def load_prior_session(session_id: str) -> SessionArtifacts | None:
     """Load prior session artifacts if they exist."""
-    artifacts_path = Path.home() / ".claude" / "rlm-frames" / f"{session_id}_artifacts.json"
+    artifacts_path = Path.home() / ".claude" / "rlm-frames" / session_id / "artifacts.json"
 
     if not artifacts_path.exists():
         return None

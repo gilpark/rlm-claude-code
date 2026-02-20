@@ -43,8 +43,8 @@ def capture_output():
 
     # Get session_id from hook input (not env var)
     session_id = hook_data.get("session_id", "default")
-    frames_dir = Path.home() / ".claude" / "rlm-frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
+    session_dir = Path.home() / ".claude" / "rlm-frames" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
 
     # Extract tool info
     tool_name = hook_data.get("tool_name", "")
@@ -72,7 +72,7 @@ def capture_output():
     }
 
     # Append to session tool log
-    tool_log_path = frames_dir / f"{session_id}_tools.jsonl"
+    tool_log_path = session_dir / "tools.jsonl"
     with open(tool_log_path, "a") as f:
         f.write(json.dumps(tool_record) + "\n")
 
