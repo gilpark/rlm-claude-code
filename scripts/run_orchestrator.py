@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -219,6 +220,7 @@ async def run_rlaph(
     depth: int = 2,
     verbose: bool = False,
     working_dir: Path | None = None,
+    session_id: str | None = None,
 ) -> str:
     """
     Run the RLAPH loop (clean synchronous llm() mode).
@@ -233,6 +235,7 @@ async def run_rlaph(
         depth: Maximum recursion depth (default 2)
         verbose: Print trajectory events
         working_dir: Working directory for file operations
+        session_id: Session ID for frame persistence (default: auto-generate)
 
     Returns:
         Final answer from RLAPH loop
@@ -259,7 +262,7 @@ async def run_rlaph(
     )
 
     # Run loop
-    result = await loop.run(query, context, working_dir=working_dir)
+    result = await loop.run(query, context, working_dir=working_dir, session_id=session_id)
 
     print(f"[RLM:DONE] Completed in {result.iterations} iterations")
     print(f"[RLM:DONE] Tokens: {result.tokens_used}, Time: {result.execution_time_ms:.0f}ms")
@@ -291,6 +294,11 @@ Examples:
     parser.add_argument("--query", "-q", dest="query_flag", help="Query to process (alternative)")
     parser.add_argument("--depth", "-d", type=int, default=2, help="Max recursion depth (default: 2)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print trajectory events")
+    parser.add_argument(
+        "--session-id",
+        dest="session_id",
+        help="Session ID for frame persistence (default: auto-detect or generate)",
+    )
 
     # Utility commands
     parser.add_argument("--validate", action="store_true", help="Validate dependencies")
@@ -325,6 +333,11 @@ Examples:
     # Determine working directory (project root)
     plugin_root = Path(__file__).parent.parent
 
+    # Get session_id from argument or environment or generate
+    session_id = args.session_id
+    if session_id is None:
+        session_id = os.environ.get("CLAUDE_SESSION_ID")
+
     # Run RLAPH loop (clean synchronous llm() mode)
     try:
         result = asyncio.run(
@@ -333,6 +346,7 @@ Examples:
                 depth=args.depth,
                 verbose=args.verbose,
                 working_dir=plugin_root,
+                session_id=session_id,
             )
         )
         print(result)
