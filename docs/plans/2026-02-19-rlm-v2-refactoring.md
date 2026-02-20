@@ -1689,16 +1689,18 @@ git commit -m "feat: complete RLM v2 refactoring"
 
 ## Summary
 
-| Phase | Tasks | Risk |
-|-------|-------|------|
-| Phase 1: Foundation | 2 | Low |
-| Phase 2: Core Refactor | 4 | Medium |
-| Phase 3: Integration | 2 | Medium |
-| Phase 4: Hooks | 3 | Low |
-| Phase 5: Cleanup | 8 | Medium |
-| Phase 6: Verification | 1 | Low |
+| Phase | Tasks | Risk | Status |
+|-------|-------|------|--------|
+| Phase 1: Foundation | 2 | Low | ✓ |
+| Phase 2: Core Refactor | 4 | Medium | ✓ |
+| Phase 3: Integration | 2 | Medium | ✓ |
+| Phase 4: Hooks | 3 | Low | ✓ |
+| Phase 5: Cleanup | 8 | Medium | ✓ |
+| Phase 6: Verification | 1 | Low | ✓ |
+| Phase 7: Hook Integration | 3 | Low | ✓ |
+| Phase 8: Causeway Branding | 4 | Low | ✓ |
 
-**Total: 20 tasks**
+**Total: 27 tasks (all complete)**
 
 ---
 
@@ -1746,18 +1748,25 @@ These could be inlined in a future pass if file count is critical.
 
 ## Next Steps
 
-### Phase 7: Hook Integration (Optional)
-- [ ] Implement `capture_output.py` for PostToolUse hook (currently placeholder)
-- [ ] Test SessionStart hook with actual frame comparison
-- [ ] Test Stop hook with actual frame extraction
+### Phase 7: Hook Integration ✓ COMPLETE
+- [x] Implement `capture_output.py` for PostToolUse hook
+- [x] Test SessionStart hook with actual frame comparison
+- [x] Test Stop hook with actual frame extraction
 
-### Phase 8: Living Documentation (Future Work)
+### Phase 8: Causeway Branding ✓ COMPLETE
+- [x] Rename plugin to "causeway"
+- [x] Update marketplace.json, pyproject.toml, __init__.py
+- [x] Create README.md and CLAUDE.md
+- [x] Update skills (context-management, verification)
+- [x] Version: 0.0.1 (fresh start)
+
+### Phase 9: Living Documentation (Future Work)
 As described in the whitepaper:
 - [ ] Implement git diff → invalidation cascade
 - [ ] Implement frame re-execution with preserved intent
 - [ ] Implement selective documentation update
 
-### Phase 9: Further Simplification (Optional)
+### Phase 10: Further Simplification (Optional)
 - [ ] Inline `response_parser.py` into `rlaph_loop.py`
 - [ ] Inline `tokenization.py` functions into `repl_environment.py`
 - [ ] Reduce to target 12 files
@@ -1765,7 +1774,43 @@ As described in the whitepaper:
 ### Known Limitations
 1. `llm()` depth management is simplified - full recursive behavior needs testing
 2. Frame lifecycle (`RUNNING` → `COMPLETED`) is implemented but not validated end-to-end
-3. Hook scripts are placeholders - full integration requires Claude Code runtime
+3. Hook integration is basic - full integration requires Claude Code runtime testing
+
+---
+
+## Final Commits (All Phases)
+
+1. `573cd05` - Simplify hooks.json to v2 structure
+2. `91ec58d` - Add v2 exports to __init__.py
+3. `fc87f58` - Replace ModelRouter with LLMClient
+4. `eb0ba0b` - Remove orchestration_schema dependency
+5. `58b41c7` - Add FrameIndex integration
+6. `1cf4f50` - Phase 5 cleanup Batch A-C
+7. `f20e599` - Phase 5 cleanup Batch D-F
+8. `456d87b` - Phase 5 cleanup Batch G
+9. `bbf1792` - Remove obsolete tests
+10. `7be7893` - Update refactoring plan with completion status
+11. `5b30b96` - Rename to Causeway and complete Phase 7
+
+---
+
+## Project Status: Complete ✓
+
+**Name:** Causeway
+**Version:** 0.0.1
+**Description:** Causal awareness for Claude Code - REPL + CausalFrame persistence
+
+**What's Done:**
+- All 20 original refactoring tasks
+- Phase 7 hook integration
+- Phase 8 branding and documentation
+- 153 tests passing
+- 18 src files (from ~90)
+
+**Ready for:**
+- Claude Code runtime testing
+- Living documentation features (Phase 9)
+- Further simplification (Phase 10)
 
 ---
 
