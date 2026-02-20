@@ -24,15 +24,21 @@ class LLMClient:
 
     Simple synchronous interface for REPL's llm() function.
     Default model cascade: root uses larger model, sub-calls use smaller.
+
+    Temperature is set LOW (0.1) by default for deterministic REPL output.
+    REPL tasks don't need creativity - they need accuracy.
     """
 
     api_key: str | None = None
-    default_model: str = "glm-4.7"
+    default_model: str = "glm-5"
     base_url: str | None = None
+    # Low temperature for deterministic REPL output (not creative)
+    # 0.0-0.3 = deterministic, 0.4-0.7 = balanced, 0.8-1.0 = creative
+    temperature: float = 0.1
     model_cascade: dict[int, str] = field(default_factory=lambda: {
-        0: "glm-4.7",  # root
-        1: "glm-4.7",  # depth 1
-        2: "glm-4.7",  # depth 2+
+        0: "glm-5",  # root - best accuracy
+        1: "glm-5",  # depth 1
+        2: "glm-4.7",  # depth 2+ - cheaper
         3: "glm-4.7",
     })
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
@@ -43,6 +49,9 @@ class LLMClient:
             self.api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         if self.base_url is None:
             self.base_url = os.environ.get("ANTHROPIC_BASE_URL")
+        # Allow temperature override via env var
+        if "ANTHROPIC_TEMPERATURE" in os.environ:
+            self.temperature = float(os.environ["ANTHROPIC_TEMPERATURE"])
 
     def _get_client(self) -> anthropic.Anthropic:
         """Get or create Anthropic client."""
@@ -86,6 +95,7 @@ class LLMClient:
         depth: int = 0,
         max_tokens: int = 4096,
         system: str | None = None,
+        temperature: float | None = None,
     ) -> str:
         """
         Make a synchronous LLM call.
@@ -97,6 +107,7 @@ class LLMClient:
             depth: Current recursion depth for model selection
             max_tokens: Maximum tokens in response
             system: Optional system prompt
+            temperature: Optional temperature override (None = use self.temperature)
 
         Returns:
             LLM response as string
@@ -111,11 +122,14 @@ class LLMClient:
         # Select model
         selected_model = model if model else self.get_model_for_depth(depth)
 
+        # Use provided temperature or default
+        temp = temperature if temperature is not None else self.temperature
+
         # Build full prompt with context
         full_prompt = self._build_prompt(query, context)
 
         # Make the actual API call
-        return self._api_call(selected_model, full_prompt, max_tokens, system)
+        return self._api_call(selected_model, full_prompt, max_tokens, system, temp)
 
     def _build_prompt(self, query: str, context: dict[str, Any] | None) -> str:
         """Build full prompt from query and context."""
@@ -143,6 +157,7 @@ class LLMClient:
         prompt: str,
         max_tokens: int = 4096,
         system: str | None = None,
+        temperature: float = 0.1,
     ) -> str:
         """Make the actual API call to Anthropic."""
         try:
@@ -152,6 +167,7 @@ class LLMClient:
                 "model": model,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,  # Low for deterministic REPL output
             }
 
             if system:

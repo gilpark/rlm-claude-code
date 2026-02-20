@@ -1771,10 +1771,28 @@ As described in the whitepaper:
 - [ ] Inline `tokenization.py` functions into `repl_environment.py`
 - [ ] Reduce to target 12 files
 
+### Phase 11: Cleanup Broken Scripts/Tests (P1)
+**See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
+- [ ] Delete 7 broken scripts importing deleted modules
+- [ ] Fix script imports (extract_frames.py, compare_sessions.py)
+- [ ] Delete broken tests
+
+### Phase 12: Fix RLM Orchestrator Hallucination (P0 - CRITICAL)
+**See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
+
+**Problem:** The RLM orchestrator hallucinates - returns fake file names, ignores execution results.
+
+- [ ] Add result verification to detect hallucinations
+- [ ] Add retry loop when verification fails
+- [ ] Strengthen system prompt against hallucination
+- [ ] Validate answers reference actually accessed files
+- [ ] Add integration tests for orchestrator accuracy
+
 ### Known Limitations
 1. `llm()` depth management is simplified - full recursive behavior needs testing
 2. Frame lifecycle (`RUNNING` → `COMPLETED`) is implemented but not validated end-to-end
 3. Hook integration is basic - full integration requires Claude Code runtime testing
+4. **CRITICAL:** RLM orchestrator hallucinates - returns fabricated file names and outputs (Phase 12 fixes this)
 
 ---
 
@@ -1794,7 +1812,7 @@ As described in the whitepaper:
 
 ---
 
-## Project Status: Complete ✓
+## Project Status: Phase 11-12 Needed
 
 **Name:** Causeway
 **Version:** 0.0.1
@@ -1807,10 +1825,14 @@ As described in the whitepaper:
 - 153 tests passing
 - 18 src files (from ~90)
 
+**Blocking Issues (must fix before release):**
+1. **RLM Orchestrator hallucinates** - Returns fabricated file names and outputs
+2. **Broken scripts** - 7 scripts import deleted modules
+3. **Broken tests** - Some tests import deleted modules
+
 **Ready for:**
-- Claude Code runtime testing
-- Living documentation features (Phase 9)
-- Further simplification (Phase 10)
+- Phase 11: Cleanup broken scripts/tests
+- Phase 12: Fix RLM orchestrator hallucination (CRITICAL)
 
 ---
 
