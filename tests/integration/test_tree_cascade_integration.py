@@ -126,13 +126,13 @@ def test_full_tree_cascade_invalidation():
     # Root has direct reason
     assert index.get("root").escalation_reason == "root changed"
 
-    # Descendants have same reason (cascaded)
-    assert index.get("child1").escalation_reason == "root changed"
-    assert index.get("leaf1").escalation_reason == "root changed"
-    assert index.get("child2").escalation_reason == "root changed"
+    # Descendants have cascaded reason (includes "Parent invalidated:" prefix)
+    assert "root changed" in index.get("child1").escalation_reason
+    assert "root changed" in index.get("leaf1").escalation_reason
+    assert "root changed" in index.get("child2").escalation_reason
 
-    # Evidence user also gets the reason (via leaf1 -> evidence_user cascade)
-    assert index.get("evidence_user").escalation_reason == "root changed"
+    # Evidence user gets invalidated because leaf1 (which it cites) was invalidated
+    assert "leaf1" in index.get("evidence_user").escalation_reason
 
 
 def test_partial_tree_invalidation():
