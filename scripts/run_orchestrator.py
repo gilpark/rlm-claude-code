@@ -164,13 +164,13 @@ def do_validate() -> dict[str, Any]:
     # Check v2 src modules
     try:
         sys.path.insert(0, str(plugin_root))
-        from src.rlaph_loop import RLAPHLoop  # noqa: F401
+        from src.repl.rlaph_loop import RLAPHLoop  # noqa: F401
     except ImportError as e:
         errors.append(f"Import error: {e}")
 
     # Check LLM client
     try:
-        from src.llm_client import LLMClient  # noqa: F401
+        from src.repl.llm_client import LLMClient  # noqa: F401
     except ImportError as e:
         errors.append(f"LLM client error: {e}")
 
@@ -237,7 +237,7 @@ async def run_rlaph(
     Returns:
         Final answer from RLAPH loop
     """
-    from src.rlaph_loop import RLAPHLoop
+    from src.repl.rlaph_loop import RLAPHLoop
 
     # Build empty context - files are read by REPL as needed
     context_data = build_context(files={}, use_disk_fallback=False)

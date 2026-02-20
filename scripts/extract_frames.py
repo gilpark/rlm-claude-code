@@ -13,8 +13,8 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.frame_store import FrameStore
-from src.frame_index import FrameIndex
+from src.frame.frame_store import FrameStore
+from src.frame.frame_index import FrameIndex
 
 
 def extract_frames(session_id: str, index: FrameIndex) -> None:

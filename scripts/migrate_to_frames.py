@@ -45,8 +45,8 @@ def trace_to_frame_data(trace_data: dict[str, Any]) -> dict[str, Any]:
 
     This is a best-effort conversion. Some fields may not have equivalents.
     """
-    from src.causal_frame import FrameStatus
-    from src.context_slice import ContextSlice
+    from src.frame.causal_frame import FrameStatus
+    from src.frame.context_slice import ContextSlice
 
     # Map old status to new FrameStatus
     status_map = {

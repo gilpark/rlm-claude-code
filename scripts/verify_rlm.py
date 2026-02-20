@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_repl_basics():
     """Test basic REPL execution."""
-    from src.repl_environment import RLMEnvironment
+    from src.repl.repl_environment import RLMEnvironment
     from src.types import SessionContext
 
     context = SessionContext()
@@ -42,7 +42,7 @@ def test_repl_basics():
 
 def test_repl_hashlib():
     """Test hashlib is available."""
-    from src.repl_environment import RLMEnvironment
+    from src.repl.repl_environment import RLMEnvironment
     from src.types import SessionContext
     import hashlib
 
@@ -59,7 +59,7 @@ def test_repl_hashlib():
 
 def test_file_access():
     """Test file access functions."""
-    from src.repl_environment import RLMEnvironment
+    from src.repl.repl_environment import RLMEnvironment
     from src.types import SessionContext
 
     context = SessionContext()
@@ -84,7 +84,7 @@ def test_file_access():
 async def test_rlm_loop():
     """Test RLM loop execution."""
     import asyncio
-    from src.rlaph_loop import RLAPHLoop
+    from src.repl.rlaph_loop import RLAPHLoop
     from src.types import SessionContext
 
     context = SessionContext()
