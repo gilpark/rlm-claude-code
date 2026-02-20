@@ -114,6 +114,9 @@ class RLAPHLoop:
         self.frame_index: FrameIndex = FrameIndex()
         self._current_frame_id: str | None = None
 
+        # Verification tracking - files accessed in last execution
+        self._last_repl_files_accessed: list[str] = []
+
     def _collect_evidence(self) -> list[str]:
         """
         Collect frame IDs that current execution depends on.
@@ -208,6 +211,18 @@ class RLAPHLoop:
             for item in parsed_items:
                 if item.action == ResponseAction.FINAL_ANSWER:
                     state.final_answer = item.content
+                    # Verify the answer for hallucinations before committing
+                    is_valid, reason = self._verify_result(state.final_answer)
+                    if not is_valid:
+                        # Verification failed - clear answer and continue loop
+                        print(f"[RLAPH] Verification failed: {reason}")
+                        state.messages.append({
+                            "role": "user",
+                            "content": f"[VERIFICATION FAILED] {reason}\n\nYour previous answer contained errors. Please try again with accurate information based on the actual code execution results."
+                        })
+                        state.final_answer = None  # Clear to continue loop
+                        break  # Exit this iteration to continue loop
+                    # Answer verified - proceed to return
                     break
 
                 elif item.action == ResponseAction.FINAL_VAR:
@@ -262,6 +277,9 @@ class RLAPHLoop:
 
                     self.frame_index.add(frame)
                     self._current_frame_id = frame.frame_id
+
+                    # Track files accessed for verification
+                    self._last_repl_files_accessed = list(self.repl.files_read.keys())
 
                     # Clear tracking for next frame
                     self.repl.files_read.clear()
@@ -446,6 +464,71 @@ Working memory: working_memory dict for storing results across code blocks"""
             else:
                 parts.append(f"{role}: {content}")
         return "\n\n---\n\n".join(parts)
+
+    def _verify_result(self, answer: str) -> tuple[bool, str]:
+        """
+        Verify the LLM's final answer for obvious hallucinations.
+
+        Detects:
+        - Non-existent file paths
+        - Obviously fake hash patterns
+        - Claims about files never accessed
+
+        Returns:
+            (is_valid, reason) tuple
+        """
+        import re
+        from pathlib import Path
+
+        # Pattern 1: Detect file paths in answer and verify they exist
+        file_pattern = r'(?:src|tests|scripts)[/\w\-\.]+\.py(?::\d+)?'
+        file_matches = re.findall(file_pattern, answer)
+
+        for file_match in file_matches:
+            # Extract just the path (remove line number)
+            path = file_match.split(':')[0]
+            # Check relative to working dir if available
+            if hasattr(self.repl, '_working_dir') and self.repl._working_dir:
+                full_path = Path(self.repl._working_dir) / path
+            else:
+                full_path = Path(path)
+
+            if not full_path.exists():
+                return (False, f"Hallucinated file path: {path} does not exist")
+
+        # Pattern 2: Detect obviously fake hashes (sequential hex)
+        fake_hash_pattern = r'[a-f0-9]{16}'
+        hash_matches = re.findall(fake_hash_pattern, answer.lower())
+
+        for hash_match in hash_matches:
+            if self._is_sequential_pattern(hash_match):
+                return (False, f"Obviously fake hash pattern: {hash_match}")
+
+        # Pattern 3: If answer mentions a file, check if we actually accessed it
+        if hasattr(self, '_last_repl_files_accessed') and file_matches:
+            for file_match in file_matches:
+                path = file_match.split(':')[0]
+                # Only validate if we tracked file access
+                if self._last_repl_files_accessed and path not in self._last_repl_files_accessed:
+                    # Only flag if it's a specific file claim, not general mention
+                    if f"{path}:" in answer or f'"{path}"' in answer or f"'{path}'" in answer:
+                        return (False, f"Answer mentions {path} but file was never accessed")
+
+        return (True, "Answer verified")
+
+    def _is_sequential_pattern(self, s: str) -> bool:
+        """Check if string is an obviously fake sequential pattern."""
+        sequential = ['a1b2c3d4e5f6a7b8', '12345678', 'abcdefgh']
+        s_lower = s.lower()
+        if s_lower in sequential:
+            return True
+
+        # Check for simple alternation patterns (aaaa, 1212)
+        if len(s) >= 4:
+            if all(s_lower[i] == s_lower[i % 2] for i in range(len(s_lower))):
+                return True
+
+        return False
 
 
 __all__ = [
