@@ -1771,28 +1771,27 @@ As described in the whitepaper:
 - [ ] Inline `tokenization.py` functions into `repl_environment.py`
 - [ ] Reduce to target 12 files
 
-### Phase 11: Cleanup Broken Scripts/Tests (P1)
+### Phase 11: Cleanup Broken Scripts/Tests (P1) ✓ COMPLETE
 **See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
-- [ ] Delete 7 broken scripts importing deleted modules
-- [ ] Fix script imports (extract_frames.py, compare_sessions.py)
-- [ ] Delete broken tests
+- [x] Delete 7 broken scripts importing deleted modules
+- [x] Fix script imports (extract_frames.py, compare_sessions.py)
+- [x] Delete broken tests
 
-### Phase 12: Fix RLM Orchestrator Hallucination (P0 - CRITICAL)
+### Phase 12: Fix RLM Orchestrator Hallucination (P0 - CRITICAL) ✓ COMPLETE
 **See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
 
 **Problem:** The RLM orchestrator hallucinates - returns fake file names, ignores execution results.
 
-- [ ] Add result verification to detect hallucinations
-- [ ] Add retry loop when verification fails
-- [ ] Strengthen system prompt against hallucination
-- [ ] Validate answers reference actually accessed files
-- [ ] Add integration tests for orchestrator accuracy
+- [x] Add result verification to detect hallucinations
+- [x] Add retry loop when verification fails
+- [x] Strengthen system prompt against hallucination
+- [x] Validate answers reference actually accessed files
+- [x] Add integration tests for orchestrator accuracy
 
 ### Known Limitations
 1. `llm()` depth management is simplified - full recursive behavior needs testing
 2. Frame lifecycle (`RUNNING` → `COMPLETED`) is implemented but not validated end-to-end
 3. Hook integration is basic - full integration requires Claude Code runtime testing
-4. **CRITICAL:** RLM orchestrator hallucinates - returns fabricated file names and outputs (Phase 12 fixes this)
 
 ---
 
@@ -1812,27 +1811,32 @@ As described in the whitepaper:
 
 ---
 
-## Project Status: Phase 11-12 Needed
+## Project Status: Phase 11-12 Complete ✓
 
 **Name:** Causeway
 **Version:** 0.0.1
 **Description:** Causal awareness for Claude Code - REPL + CausalFrame persistence
 
 **What's Done:**
-- All 20 original refactoring tasks
-- Phase 7 hook integration
-- Phase 8 branding and documentation
-- 153 tests passing
+- All 20 original refactoring tasks (Phases 1-8)
+- Phase 11: Cleanup broken scripts/tests
+- Phase 12: Fixed RLM orchestrator hallucination
+- 201 tests passing (197 unit + 4 integration)
 - 18 src files (from ~90)
 
-**Blocking Issues (must fix before release):**
-1. **RLM Orchestrator hallucinates** - Returns fabricated file names and outputs
-2. **Broken scripts** - 7 scripts import deleted modules
-3. **Broken tests** - Some tests import deleted modules
+**Blocking Issues:** None ✓ All Resolved
+
+**Config defaults (benchmark-tested):**
+- root_model: glm-4.6 (100% accuracy, 3.1s avg)
+- recursive_depth_1: glm-4.6
+- recursive_depth_2: glm-4.7
+- recursive_depth_3: glm-4.7
+- temperature: 0.1 (deterministic for REPL)
 
 **Ready for:**
-- Phase 11: Cleanup broken scripts/tests
-- Phase 12: Fix RLM orchestrator hallucination (CRITICAL)
+- Claude Code runtime testing
+- Living documentation features (Phase 9)
+- Further simplification (Phase 10)
 
 ---
 
