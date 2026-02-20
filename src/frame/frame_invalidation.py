@@ -1,7 +1,6 @@
 """Frame invalidation with cascade propagation."""
 
 from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,15 +17,16 @@ def propagate_invalidation(
 
     Propagation direction:
     - DOWN: to all children (tree walk)
-    - UP + SIDEWAYS: to frames using this as evidence (scan)
+    - SIDEWAYS: to frames using this as evidence
 
-    At 10-20 frames, O(n) scan is instant. No DAG structure needed.
+    Returns list of all invalidated frame IDs.
     """
     from .causal_frame import FrameStatus
 
     invalidated = set()
 
-    def _invalidate(fid: str):
+    def _invalidate(fid: str, current_reason: str):
+        # Cycle detection
         if fid in invalidated:
             return
         invalidated.add(fid)
@@ -35,17 +35,18 @@ def propagate_invalidation(
         if frame is None:
             return
 
+        # Update status and reason
         frame.status = FrameStatus.INVALIDATED
-        frame.escalation_reason = reason
+        frame.escalation_reason = current_reason
 
         # CASCADE DOWN to children
         for child_id in frame.children:
-            _invalidate(child_id)
+            _invalidate(child_id, f"Parent invalidated: {reason}")
 
-        # SCAN for UP + SIDEWAYS (frames using this as evidence)
-        for other_id, other in index.items():
-            if fid in other.evidence:
-                _invalidate(other_id)
+        # CASCADE SIDEWAYS to evidence consumers
+        dependents = index.find_dependent_frames(fid)
+        for dep_id in dependents:
+            _invalidate(dep_id, f"Evidence invalidated: {fid}")
 
-    _invalidate(frame_id)
+    _invalidate(frame_id, reason)
     return list(invalidated)

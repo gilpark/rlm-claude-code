@@ -95,3 +95,41 @@ def test_invalidation_sets_escalation_reason():
     propagate_invalidation("frame", "test reason", index)
 
     assert index.get("frame").escalation_reason == "test reason"
+
+
+def test_propagate_handles_cycles():
+    """Cycles don't cause infinite loop."""
+    index = FrameIndex()
+    # Create frames with circular evidence dependencies
+    f1 = make_frame_with_children("f1", evidence=["f2"])
+    f2 = make_frame_with_children("f2", evidence=["f3"])
+    f3 = make_frame_with_children("f3", evidence=["f1"])  # Cycle: f1 -> f2 -> f3 -> f1
+
+    for f in [f1, f2, f3]:
+        index.add(f)
+
+    # This should complete without infinite loop
+    invalidated = propagate_invalidation("f1", "cycle test", index)
+
+    # All frames should be invalidated despite the cycle
+    assert "f1" in invalidated
+    assert "f2" in invalidated
+    assert "f3" in invalidated
+
+
+def test_propagate_records_escalation_reason_for_cascades():
+    """Escalation reason is recorded for cascaded invalidations."""
+    index = FrameIndex()
+    parent = make_frame_with_children("parent", children=["child"])
+    child = make_frame_with_children("child", parent_id="parent", evidence=["parent"])
+
+    index.add(parent)
+    index.add(child)
+
+    propagate_invalidation("parent", "original reason", index)
+
+    # Parent gets original reason
+    assert index.get("parent").escalation_reason == "original reason"
+    # Child gets cascaded reason from parent
+    child_reason = index.get("child").escalation_reason
+    assert "original reason" in child_reason
