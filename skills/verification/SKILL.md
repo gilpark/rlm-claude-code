@@ -1,4 +1,4 @@
-# Causeway Constraint Verification Skill
+# CausalFrame Constraint Verification Skill
 
 ## When to Activate
 
@@ -63,7 +63,7 @@ if model.solve():
     print("Schedule feasible")
 ```
 
-## Integration with Causeway
+## Integration with CausalFrame
 
 At depth=2, use constraint verification to check proposed changes:
 
@@ -96,5 +96,5 @@ def verify_with_constraints(change, context):
 ## References
 
 - CPMpy Docs: https://cpmpy.readthedocs.io/
-- Design: docs/plans/2026-02-19-design.md
-- Whitepaper: docs/plans/2026-02-19-whitepaper.md
+- Design: docs/DESIGN.md
+- Whitepaper: docs/WHITEPAPER.md

@@ -1,6 +1,6 @@
-# Causeway Roadmap
+# CausalFrame Roadmap
 
-Future development plans for the Causeway plugin.
+Future development plans for the CausalFrame plugin.
 
 ## Phase 9: Living Documentation
 

@@ -1,6 +1,6 @@
-# Causeway Changelog
+# CausalFrame Changelog
 
-All notable changes to Causeway are documented in this file.
+All notable changes to CausalFrame are documented in this file.
 
 ## [0.0.1] - 2026-02-19
 

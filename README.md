@@ -1,4 +1,4 @@
-# Causeway
+# CausalFrame
 
 > Causal awareness for Claude Code — externalize reasoning, evolve with your environment.
 
@@ -10,7 +10,7 @@ This is reasoning amnesia. And it is an architecture problem, not a hardware pro
 
 ## The Solution
 
-Causeway implements two mechanisms that work together:
+CausalFrame implements two mechanisms that work together:
 
 ### 1. REPL — Spatial Externalization
 The model doesn't receive context passively — it navigates it actively:
@@ -31,7 +31,7 @@ CausalFrame(
 )
 ```
 
-When `auth.py` changes, Causeway:
+When `auth.py` changes, CausalFrame:
 1. Finds all frames where `auth.py` was in the context
 2. Marks those frames invalidated
 3. Cascades to dependent frames
@@ -41,10 +41,10 @@ When `auth.py` changes, Causeway:
 
 ```bash
 # Clone the plugin
-git clone https://github.com/rand/causeway.git ~/.claude/plugins/marketplaces/causeway
+git clone https://github.com/rand/causalframe.git ~/.claude/plugins/marketplaces/causalframe
 
 # Install dependencies
-cd ~/.claude/plugins/marketplaces/causeway
+cd ~/.claude/plugins/marketplaces/causalframe
 uv sync
 ```
 
@@ -55,18 +55,18 @@ uv sync
 Add to your `~/.claude/settings.json`:
 ```json
 {
-  "plugins": ["~/.claude/plugins/marketplaces/causeway"]
+  "plugins": ["~/.claude/plugins/marketplaces/causalframe"]
 }
 ```
 
 ### Skills
 
-- `/causeway` - Activate causal mode for complex reasoning
+- `/causalframe` - Activate causal mode for complex reasoning
 - `/verification` - Constraint verification for proposed changes
 
 ### Hooks
 
-Causeway hooks into Claude Code's lifecycle:
+CausalFrame hooks into Claude Code's lifecycle:
 
 | Hook | Purpose |
 |------|---------|
@@ -103,8 +103,8 @@ Not because the context window is large enough to hold everything — but becaus
 
 ## References
 
-- [Whitepaper](docs/plans/2026-02-19-whitepaper.md) - "Externalizing Causation: Toward AI That Evolves With Its Environment"
-- [Design Doc](docs/plans/2026-02-19-design.md) - Architecture and implementation details
+- [Whitepaper](docs/WHITEPAPER.md) - "Externalizing Causation: Toward AI That Evolves With Its Environment"
+- [Design Doc](docs/DESIGN.md) - Architecture and implementation details
 - [Zhang et al., "Recursive Language Models" (2025)](https://arxiv.org/abs/2512.24601v1) - The foundation
 
 ## License

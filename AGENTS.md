@@ -1,10 +1,10 @@
-# AGENTS.md - Causeway Project Guide
+# AGENTS.md - CausalFrame Project Guide
 
 This is a Claude Code plugin that provides **causal awareness** through REPL-based context navigation and CausalFrame persistence.
 
 ## Project Overview
 
-**Causeway** gives Claude Code the ability to:
+**CausalFrame** gives Claude Code the ability to:
 1. Externalize context into a navigable REPL (spatial awareness)
 2. Persist reasoning chains across sessions (temporal awareness)
 3. Detect when prior conclusions are invalidated by code changes (causal awareness)
@@ -79,6 +79,15 @@ uv run pytest tests/integration/ -v -o asyncio_mode=auto
 - Track file access to detect hallucinations
 
 ## Configuration
+
+```json
+{
+  "causalframe": {
+    "activation": {"mode": "micro"},
+    "depth": {"default": 2, "max": 3}
+  }
+}
+```
 
 Config priority: **Plugin config file > Dataclass defaults > Environment variables**
 

@@ -1,7 +1,7 @@
 [project]
-name = "causeway"
+name = "causalframe"
 version = "0.0.1"
-description = "Causeway: Causal awareness for Claude Code - REPL + CausalFrame persistence"
+description = "CausalFrame: Causal awareness for Claude Code - REPL + CausalFrame persistence"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

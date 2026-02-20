@@ -1,10 +1,10 @@
-# Causeway - Claude Code Instructions
+# CausalFrame - Claude Code Instructions
 
-This is the Causeway plugin for Claude Code.
+This is the CausalFrame plugin for Claude Code.
 
-## What Causeway Does
+## What CausalFrame Does
 
-Causeway gives Claude Code **causal awareness** — the ability to:
+CausalFrame gives Claude Code **causal awareness** — the ability to:
 1. Externalize context into a navigable REPL
 2. Persist reasoning chains across sessions
 3. Detect when prior conclusions are invalidated by changes
@@ -45,7 +45,7 @@ Every reasoning step is captured with:
 
 ## Skills
 
-- `/causeway` - Activate for complex multi-step reasoning
+- `/causalframe` - Activate for complex multi-step reasoning
 - `/verification` - Constraint verification with CPMpy
 
 ## Hooks
@@ -82,6 +82,6 @@ src/
 
 ## References
 
-- [Design Doc](docs/plans/2026-02-19-design.md)
-- [Whitepaper](docs/plans/2026-02-19-whitepaper.md)
+- [Design Doc](docs/DESIGN.md)
+- [Whitepaper](docs/WHITEPAPER.md)
 - [Refactoring Plan](docs/plans/2026-02-19-rlm-v2-refactoring.md)

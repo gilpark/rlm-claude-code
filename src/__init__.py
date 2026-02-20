@@ -1,4 +1,4 @@
-"""Causeway v2: REPL + CausalFrame persistence.
+"""CausalFrame v2: REPL + CausalFrame persistence.
 
 Causal awareness for Claude Code - externalize reasoning, evolve with
 your environment through REPL-based context decomposition.

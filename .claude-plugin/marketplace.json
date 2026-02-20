@@ -1,13 +1,13 @@
 {
-  "name": "causeway",
-  "description": "Causeway: Causal awareness for Claude Code - externalize reasoning, evolve with your environment",
+  "name": "causalframe",
+  "description": "CausalFrame: Causal awareness for Claude Code - externalize reasoning, evolve with your environment",
   "owner": {
     "name": "gil",
     "url": "https://github.com/gil"
   },
   "plugins": [
     {
-      "name": "causeway",
+      "name": "causalframe",
       "source": "./",
       "description": "Causal awareness for Claude Code - REPL + CausalFrame persistence for evolving AI work products",
       "version": "0.0.1"

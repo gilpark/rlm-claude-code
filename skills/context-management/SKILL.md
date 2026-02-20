@@ -1,10 +1,10 @@
-# Causeway Context Management Skill
+# CausalFrame Context Management Skill
 
 ## When to Activate
 
 This skill activates when:
 - Context exceeds complexity threshold (cross-file reasoning, debugging with large output, multi-module tasks)
-- User explicitly requests causeway mode (`/causeway`)
+- User explicitly requests causalframe mode (`/causalframe`)
 - Task requires verification chains (depth=2 patterns)
 
 ## Capabilities
@@ -56,7 +56,7 @@ Signal completion with:
 
 ```json
 {
-  "causeway": {
+  "causalframe": {
     "activation": {"mode": "complexity"},
     "depth": {"default": 2, "max": 3}
   }
@@ -65,6 +65,6 @@ Signal completion with:
 
 ## References
 
-- Design: docs/plans/2026-02-19-design.md
-- Whitepaper: docs/plans/2026-02-19-whitepaper.md
+- Design: docs/DESIGN.md
+- Whitepaper: docs/WHITEPAPER.md
 - RLM Paper: https://arxiv.org/abs/2512.24601v1

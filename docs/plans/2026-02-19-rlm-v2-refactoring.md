@@ -1698,7 +1698,7 @@ git commit -m "feat: complete RLM v2 refactoring"
 | Phase 5: Cleanup | 8 | Medium | ✓ |
 | Phase 6: Verification | 1 | Low | ✓ |
 | Phase 7: Hook Integration | 3 | Low | ✓ |
-| Phase 8: Causeway Branding | 4 | Low | ✓ |
+| Phase 8: CausalFrame Branding | 4 | Low | ✓ |
 
 **Total: 27 tasks (all complete)**
 
@@ -1753,8 +1753,8 @@ These could be inlined in a future pass if file count is critical.
 - [x] Test SessionStart hook with actual frame comparison
 - [x] Test Stop hook with actual frame extraction
 
-### Phase 8: Causeway Branding ✓ COMPLETE
-- [x] Rename plugin to "causeway"
+### Phase 8: CausalFrame Branding ✓ COMPLETE
+- [x] Rename plugin to "causalframe"
 - [x] Update marketplace.json, pyproject.toml, __init__.py
 - [x] Create README.md and CLAUDE.md
 - [x] Update skills (context-management, verification)
@@ -1807,13 +1807,13 @@ As described in the whitepaper:
 8. `456d87b` - Phase 5 cleanup Batch G
 9. `bbf1792` - Remove obsolete tests
 10. `7be7893` - Update refactoring plan with completion status
-11. `5b30b96` - Rename to Causeway and complete Phase 7
+11. `5b30b96` - Rename to CausalFrame and complete Phase 7
 
 ---
 
 ## Project Status: Phase 11-12 Complete ✓
 
-**Name:** Causeway
+**Name:** CausalFrame
 **Version:** 0.0.1
 **Description:** Causal awareness for Claude Code - REPL + CausalFrame persistence
 
