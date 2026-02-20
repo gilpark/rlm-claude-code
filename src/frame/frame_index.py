@@ -20,6 +20,7 @@ class FrameIndex:
 
     def __init__(self):
         self._frames: dict[str, "CausalFrame"] = {}
+        self.commit_hash: str | None = None  # Git commit hash for change detection
 
     def add(self, frame: "CausalFrame") -> None:
         """Add a frame to the index."""
@@ -114,6 +115,7 @@ class FrameIndex:
 
         data = {
             "session_id": session_id,
+            "commit_hash": self.commit_hash,
             "frames": frames_data,
             "saved_at": datetime.now().isoformat(),
         }
@@ -150,6 +152,7 @@ class FrameIndex:
             data = json.load(f)
 
         index = cls()
+        index.commit_hash = data.get("commit_hash")
         for frame_dict in data.get("frames", []):
             context_slice = ContextSlice(
                 files=frame_dict["context_slice"]["files"],
