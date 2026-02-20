@@ -30,8 +30,16 @@ def extract_frames(session_id: str, index: FrameIndex) -> None:
 
 def main():
     """Main entry point for hook."""
-    # Get session info from environment or stdin
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "unknown")
+    # Read hook input from stdin to get session_id
+    hook_data = {}
+    try:
+        stdin_data = sys.stdin.read().strip()
+        if stdin_data:
+            hook_data = json.loads(stdin_data)
+    except json.JSONDecodeError:
+        pass
+
+    session_id = hook_data.get("session_id", os.environ.get("CLAUDE_SESSION_ID", "unknown"))
 
     # For now, this is a placeholder - the actual frame extraction
     # would come from the running session's FrameIndex

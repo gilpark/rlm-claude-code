@@ -32,11 +32,7 @@ def capture_output():
     For v2, we track tool outputs in a simple JSONL log that can be
     picked up by the frame extraction process.
     """
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "default")
-    frames_dir = Path.home() / ".claude" / "rlm-frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-
-    # Read hook input from stdin
+    # Read hook input from stdin FIRST
     hook_data = {}
     try:
         stdin_data = sys.stdin.read().strip()
@@ -44,6 +40,11 @@ def capture_output():
             hook_data = json.loads(stdin_data)
     except json.JSONDecodeError:
         pass
+
+    # Get session_id from hook input (not env var)
+    session_id = hook_data.get("session_id", "default")
+    frames_dir = Path.home() / ".claude" / "rlm-frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
 
     # Extract tool info
     tool_name = hook_data.get("tool_name", "")

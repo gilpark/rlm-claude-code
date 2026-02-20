@@ -45,10 +45,28 @@ def load_prior_session(session_id: str) -> SessionArtifacts | None:
 
 def main():
     """Main entry point for hook."""
-    session_id = os.environ.get("CLAUDE_SESSION_ID", "unknown")
+    # Read hook input from stdin to get session_id
+    hook_data = {}
+    try:
+        stdin_data = sys.stdin.read().strip()
+        if stdin_data:
+            hook_data = json.loads(stdin_data)
+    except json.JSONDecodeError:
+        pass
 
-    # Get prior session ID if provided
-    prior_session_id = os.environ.get("CLAUDE_PRIOR_SESSION_ID")
+    session_id = hook_data.get("session_id", "unknown")
+    transcript_path = hook_data.get("transcript_path", "")
+
+    # Get prior session ID from transcript path (parent session)
+    # If no transcript path, look for most recent session in rlm-frames
+    prior_session_id = None
+    if transcript_path:
+        # Could extract prior session from transcript
+        pass
+
+    if not prior_session_id:
+        # Fall back to environment variable for testing
+        prior_session_id = os.environ.get("CLAUDE_PRIOR_SESSION_ID")
 
     if not prior_session_id:
         print("No prior session to compare")
