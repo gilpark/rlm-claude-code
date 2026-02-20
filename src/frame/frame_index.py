@@ -181,3 +181,52 @@ class FrameIndex:
             index.add(frame)
 
         return index
+
+    @classmethod
+    def load_with_validation(
+        cls,
+        session_id: str,
+        base_dir: Path | None = None,
+        current_root: Path | None = None,
+    ) -> "FrameIndex":
+        """
+        Load frame index and validate frames against current file state.
+
+        Uses git diff to detect changed files, then invalidates frames
+        whose context_slice files have different hashes.
+
+        Args:
+            session_id: Session identifier to load
+            base_dir: Optional base directory for frame files
+            current_root: Current repo root (for git diff)
+
+        Returns:
+            FrameIndex with validated/invalidated frames
+        """
+        from .causal_frame import FrameStatus
+        from .context_map import detect_changed_files
+        from .frame_invalidation import propagate_invalidation
+
+        index = cls.load(session_id, base_dir)
+
+        if index.commit_hash and current_root:
+            # Detect changed files via git diff
+            changed_paths = detect_changed_files(index.commit_hash, current_root)
+            changed_strs = {str(p) for p in changed_paths}
+
+            # Check each frame for hash mismatches
+            for frame in index.values():
+                if frame.status != FrameStatus.COMPLETED:
+                    continue
+
+                for file_path, stored_hash in frame.context_slice.files.items():
+                    if file_path in changed_strs:
+                        # File changed since frame was created
+                        propagate_invalidation(
+                            frame.frame_id,
+                            f"File changed: {file_path}",
+                            index,
+                        )
+                        break
+
+        return index
