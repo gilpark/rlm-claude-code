@@ -370,12 +370,18 @@ CRITICAL RULES:
 3. DO NOT pretend to see execution results - wait for the actual system response
 4. After writing code, STOP and wait for the [SYSTEM - Code execution result]
 5. When you have the final answer, write: FINAL: <answer>
+6. NEVER use import statements - they are blocked. Pre-loaded: hashlib, json, re, os, sys
 
 Your workflow:
 1. Write Python code in ```python blocks
 2. STOP - the system will execute and return [SYSTEM - Code execution result]
 3. Read the REAL output from the system
 4. Write more code OR provide FINAL: <answer>
+
+Pre-loaded Libraries (NO import needed):
+- hashlib: Use directly as `hashlib.sha256(data.encode()).hexdigest()`
+- json: Use directly as `json.loads()`, `json.dumps()`
+- re: Use directly for regex operations
 
 File Access Functions:
 - `read_file(path, offset=0, limit=2000)`: Read file content from disk

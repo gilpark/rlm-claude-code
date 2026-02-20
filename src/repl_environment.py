@@ -1711,8 +1711,7 @@ class RLMEnvironment:
         if tool_bridge:
             self._tool_bridge = tool_bridge
         else:
-            from .orchestration_schema import ToolAccessLevel
-            from .tool_bridge import ToolPermissions, ToolBridge
+            from .tool_bridge import ToolAccessLevel, ToolPermissions, ToolBridge
 
             # Create tool bridge with read-only permissions
             permissions = ToolPermissions(

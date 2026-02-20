@@ -187,6 +187,72 @@ wheels = [
 ]
 
 [[package]]
+name = "causeway"
+version = "0.0.1"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "cpmpy" },
+    { name = "hypothesis" },
+    { name = "nest-asyncio" },
+    { name = "numpy" },
+    { name = "openai" },
+    { name = "pandas" },
+    { name = "polars" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "restrictedpython" },
+    { name = "rich" },
+    { name = "seaborn" },
+    { name = "tiktoken" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-benchmark" },
+    { name = "pytest-cov" },
+    { name = "pytest-watch" },
+    { name = "ruff" },
+    { name = "syrupy" },
+]
+local = [
+    { name = "gliner" },
+    { name = "sentence-transformers" },
+    { name = "setfit" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "cpmpy", specifier = ">=0.9.20" },
+    { name = "gliner", marker = "extra == 'local'", specifier = ">=0.2.0" },
+    { name = "hypothesis", specifier = ">=6.0" },
+    { name = "nest-asyncio", specifier = ">=1.6.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
+    { name = "openai", specifier = ">=2.15.0" },
+    { name = "pandas", specifier = ">=2.0.0" },
+    { name = "polars", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "pytest-watch", marker = "extra == 'dev'", specifier = ">=4.2" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "restrictedpython", specifier = ">=7.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "seaborn", specifier = ">=0.13.0" },
+    { name = "sentence-transformers", marker = "extra == 'local'", specifier = ">=2.0.0" },
+    { name = "setfit", marker = "extra == 'local'", specifier = ">=1.0.0" },
+    { name = "syrupy", marker = "extra == 'dev'", specifier = ">=4.0" },
+    { name = "tiktoken", specifier = ">=0.5.0" },
+]
+provides-extras = ["dev", "local", "rlm-core"]
+
+[[package]]
 name = "certifi"
 version = "2026.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2257,72 +2323,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/fb/d2/8920e102050a0de7b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/25/7a/b0178788f8dc6cafce37a212c99565fa1fe7872c70c6c9c1e1a372d9d88f/rich-14.2.0-py3-none-any.whl", hash = "sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd", size = 243393, upload-time = "2025-10-09T14:16:51.245Z" },
 ]
-
-[[package]]
-name = "rlm-claude-code"
-version = "0.7.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "cpmpy" },
-    { name = "hypothesis" },
-    { name = "nest-asyncio" },
-    { name = "numpy" },
-    { name = "openai" },
-    { name = "pandas" },
-    { name = "polars" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "restrictedpython" },
-    { name = "rich" },
-    { name = "seaborn" },
-    { name = "tiktoken" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-benchmark" },
-    { name = "pytest-cov" },
-    { name = "pytest-watch" },
-    { name = "ruff" },
-    { name = "syrupy" },
-]
-local = [
-    { name = "gliner" },
-    { name = "sentence-transformers" },
-    { name = "setfit" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "cpmpy", specifier = ">=0.9.20" },
-    { name = "gliner", marker = "extra == 'local'", specifier = ">=0.2.0" },
-    { name = "hypothesis", specifier = ">=6.0" },
-    { name = "nest-asyncio", specifier = ">=1.6.0" },
-    { name = "numpy", specifier = ">=1.26.0" },
-    { name = "openai", specifier = ">=2.15.0" },
-    { name = "pandas", specifier = ">=2.0.0" },
-    { name = "polars", specifier = ">=1.0.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "pytest-watch", marker = "extra == 'dev'", specifier = ">=4.2" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "restrictedpython", specifier = ">=7.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "seaborn", specifier = ">=0.13.0" },
-    { name = "sentence-transformers", marker = "extra == 'local'", specifier = ">=2.0.0" },
-    { name = "setfit", marker = "extra == 'local'", specifier = ">=1.0.0" },
-    { name = "syrupy", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "tiktoken", specifier = ">=0.5.0" },
-]
-provides-extras = ["dev", "local", "rlm-core"]
 
 [[package]]
 name = "ruff"

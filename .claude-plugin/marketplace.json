@@ -2,8 +2,8 @@
   "name": "causeway",
   "description": "Causeway: Causal awareness for Claude Code - externalize reasoning, evolve with your environment",
   "owner": {
-    "name": "rand",
-    "url": "https://github.com/rand"
+    "name": "gil",
+    "url": "https://github.com/gil"
   },
   "plugins": [
     {

@@ -161,18 +161,18 @@ def do_validate() -> dict[str, Any]:
     if not venv_python.exists():
         errors.append("venv not found - run 'uv sync'")
 
-    # Check src modules
+    # Check v2 src modules
     try:
         sys.path.insert(0, str(plugin_root))
-        from src.orchestrator import RLMOrchestrator  # noqa: F401
+        from src.rlaph_loop import RLAPHLoop  # noqa: F401
     except ImportError as e:
         errors.append(f"Import error: {e}")
 
-    # Check API client
+    # Check LLM client
     try:
-        from src.api_client import MultiProviderClient  # noqa: F401
+        from src.llm_client import LLMClient  # noqa: F401
     except ImportError as e:
-        errors.append(f"API client error: {e}")
+        errors.append(f"LLM client error: {e}")
 
     if errors:
         return {"status": "error", "reasons": errors}
@@ -238,7 +238,6 @@ async def run_rlaph(
         Final answer from RLAPH loop
     """
     from src.rlaph_loop import RLAPHLoop
-    from src.trajectory import TrajectoryRenderer
 
     # Build empty context - files are read by REPL as needed
     context_data = build_context(files={}, use_disk_fallback=False)
@@ -250,14 +249,10 @@ async def run_rlaph(
         if working_dir:
             print(f"[RLAPH] Working dir: {working_dir}")
 
-    # Create renderer for verbose output
-    renderer = TrajectoryRenderer(verbosity="verbose") if verbose else None
-
-    # Create RLAPH loop
+    # Create RLAPH loop (no renderer in v2 - verbose handled internally)
     loop = RLAPHLoop(
         max_iterations=20,
         max_depth=depth,
-        renderer=renderer,
     )
 
     # Run loop
