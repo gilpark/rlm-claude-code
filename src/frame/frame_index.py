@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
     from .causal_frame import CausalFrame, FrameStatus
 
 
+@dataclass
 class FrameIndex:
     """
     Flat index for O(n) frame lookup and branch queries.
@@ -18,13 +20,25 @@ class FrameIndex:
     At 10-20 frames, O(n) scan is instant. No DAG structure needed.
     """
 
-    def __init__(self):
-        self._frames: dict[str, "CausalFrame"] = {}
-        self.commit_hash: str | None = None  # Git commit hash for change detection
+    initial_query: str = ""
+    query_summary: str = ""
+    commit_hash: str | None = None  # Git commit hash for change detection
+    _frames: dict[str, "CausalFrame"] = field(default_factory=dict)
+    _dependent_cache: dict[str, set[str]] = field(default_factory=dict)  # For B4
 
     def add(self, frame: "CausalFrame") -> None:
-        """Add a frame to the index."""
+        """Add a frame to the index and update parent's children list."""
         self._frames[frame.frame_id] = frame
+
+        # Invalidate dependent cache when frames change
+        self._dependent_cache.clear()
+
+        # Update parent's children list (defensive)
+        if frame.parent_id and frame.parent_id in self._frames:
+            parent = self._frames[frame.parent_id]
+            if frame.frame_id not in parent.children:
+                parent.children.append(frame.frame_id)
+            # else: already added (idempotent, no-op)
 
     def get(self, frame_id: str) -> "CausalFrame | None":
         """Get a frame by ID, or None if not found."""
@@ -115,6 +129,8 @@ class FrameIndex:
 
         data = {
             "session_id": session_id,
+            "initial_query": self.initial_query,
+            "query_summary": self.query_summary,
             "commit_hash": self.commit_hash,
             "frames": frames_data,
             "saved_at": datetime.now().isoformat(),
