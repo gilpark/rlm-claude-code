@@ -64,18 +64,21 @@ class LLMClient:
         """
         Get appropriate model for recursion depth from config.
 
+        Plugin config has highest priority - it's the source of truth.
+        Env vars are only used as fallback if no config exists.
+
+        Priority:
+        1. Config file (~/.claude/rlm-config.json) - HIGHEST
+        2. Dataclass defaults
+        3. Environment variables - LOWEST (fallback only)
+
         Args:
             depth: Current recursion depth (0 = root)
 
         Returns:
             Model identifier string
         """
-        # Environment variable override (highest priority)
-        env_model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
-        if env_model:
-            return env_model
-
-        # Use config
+        # Use config (highest priority for plugin)
         if self.config:
             models = self.config.models
             depth_model_map = {
@@ -86,20 +89,34 @@ class LLMClient:
             }
             return depth_model_map.get(depth, models.recursive_depth_3)
 
-        # Fallback
+        # Fallback to env var (only if no config)
+        env_model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL")
+        if env_model:
+            return env_model
+
+        # Final fallback
         return "glm-4.6"
 
     def get_temperature(self) -> float:
-        """Get temperature from config or env override."""
-        # Environment variable override
-        if "ANTHROPIC_TEMPERATURE" in os.environ:
-            return float(os.environ["ANTHROPIC_TEMPERATURE"])
+        """
+        Get temperature from config.
 
-        # Use config
+        Plugin config has highest priority.
+
+        Priority:
+        1. Config file (~/.claude/rlm-config.json) - HIGHEST
+        2. Dataclass defaults
+        3. Environment variables - LOWEST (fallback only)
+        """
+        # Use config (highest priority for plugin)
         if self.config:
             return self.config.models.temperature
 
-        # Fallback
+        # Fallback to env var (only if no config)
+        if "ANTHROPIC_TEMPERATURE" in os.environ:
+            return float(os.environ["ANTHROPIC_TEMPERATURE"])
+
+        # Final fallback
         return 0.1
 
     def call(
