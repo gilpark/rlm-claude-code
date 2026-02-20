@@ -545,6 +545,24 @@ Working memory: working_memory dict for storing results across code blocks"""
 
         return False
 
+    async def _read_files_parallel(self, paths: list[str]) -> dict[str, str]:
+        """
+        Read multiple files in parallel using async I/O.
+
+        This is used when the REPL needs to read multiple files
+        for context externalization.
+
+        Args:
+            paths: List of file paths to read
+
+        Returns:
+            Dict mapping path -> content
+        """
+        if not self.repl:
+            return {}
+
+        return await self.repl.read_files_async(paths)
+
 
 __all__ = [
     "RLAPHLoop",

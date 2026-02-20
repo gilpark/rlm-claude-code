@@ -2256,6 +2256,74 @@ class RLMEnvironment:
 
         return entries
 
+    # =========================================================================
+    # Async File I/O (Task 8 - Parallel file reads)
+    # =========================================================================
+
+    async def read_file_async(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int = 2000,
+    ) -> str:
+        """
+        Async version of read_file for non-blocking file access.
+
+        Uses asyncio.to_thread for true async I/O.
+
+        Args:
+            path: File path (absolute or relative to working_dir)
+            offset: Line offset to start reading (default 0)
+            limit: Maximum number of lines to read (default 2000)
+
+        Returns:
+            File content as string
+        """
+        import asyncio
+
+        # Run sync version in thread pool
+        return await asyncio.to_thread(
+            self._read_file, path, offset, limit
+        )
+
+    async def read_files_async(
+        self,
+        paths: list[str],
+        offset: int = 0,
+        limit: int = 2000,
+    ) -> dict[str, str]:
+        """
+        Read multiple files in parallel using asyncio.gather.
+
+        This is the key optimization for large file sets:
+        - Sync: read(file1) -> wait -> read(file2) -> wait -> ...
+        - Async: gather(read(file1), read(file2), ...) -> wait once
+
+        Args:
+            paths: List of file paths to read
+            offset: Line offset for all files (default 0)
+            limit: Maximum lines per file (default 2000)
+
+        Returns:
+            Dict mapping path -> content (or error string)
+        """
+        import asyncio
+
+        async def read_with_error_handling(path: str) -> tuple[str, str]:
+            """Read file and return (path, content) tuple."""
+            try:
+                content = await self.read_file_async(path, offset=offset, limit=limit)
+                return (path, content)
+            except Exception as e:
+                return (path, f"ERROR: {e}")
+
+        # Gather all reads in parallel
+        results = await asyncio.gather(*[
+            read_with_error_handling(path) for path in paths
+        ])
+
+        return dict(results)
+
     def get_context_stats(self) -> dict[str, Any]:
         """
         Get statistics about the current context.
