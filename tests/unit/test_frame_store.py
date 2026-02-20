@@ -6,9 +6,9 @@ from pathlib import Path
 from datetime import datetime
 import tempfile
 
-from src.causal_frame import CausalFrame, FrameStatus
-from src.context_slice import ContextSlice
-from src.frame_store import FrameStore
+from src.frame.causal_frame import CausalFrame, FrameStatus
+from src.frame.context_slice import ContextSlice
+from src.frame.frame_store import FrameStore
 
 
 class TestFrameStore:

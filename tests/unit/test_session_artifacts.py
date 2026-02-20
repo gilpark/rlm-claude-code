@@ -1,6 +1,6 @@
 """Tests for SessionArtifacts and FileRecord."""
 
-from src.session_artifacts import FileRecord, SessionArtifacts
+from src.session.session_artifacts import FileRecord, SessionArtifacts
 
 
 def test_file_record_creation():

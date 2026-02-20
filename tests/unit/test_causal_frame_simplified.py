@@ -1,8 +1,8 @@
 """Tests for simplified CausalFrame."""
 
 import pytest
-from src.causal_frame import CausalFrame, FrameStatus, compute_frame_id
-from src.context_slice import ContextSlice
+from src.frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id
+from src.frame.context_slice import ContextSlice
 
 
 class TestSimplifiedFrameStatus:

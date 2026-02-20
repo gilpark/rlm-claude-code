@@ -25,8 +25,8 @@ from RestrictedPython.Guards import (
     safer_getattr,
 )
 
-from .tokenization import partition_content_by_tokens
-from .types import DeferredBatch, DeferredOperation, ExecutionResult, SessionContext
+from ..tokenization import partition_content_by_tokens
+from ..types import DeferredBatch, DeferredOperation, ExecutionResult, SessionContext
 
 # REPL function access levels (SPEC-14.03-14.04)
 REPLAccessLevel = Literal["micro", "standard", "full"]

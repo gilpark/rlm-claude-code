@@ -24,14 +24,14 @@ from typing import TYPE_CHECKING, Any
 warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="RestrictedPython")
 
-from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
-from .config import RLMConfig, default_config
-from .context_slice import ContextSlice
-from .frame_index import FrameIndex
+from ..config import RLMConfig, default_config
+from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id
+from ..frame.context_slice import ContextSlice
+from ..frame.frame_index import FrameIndex
+from ..types import RecursionDepthError, SessionContext
 from .llm_client import LLMClient
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
-from .types import RecursionDepthError, SessionContext
 
 if TYPE_CHECKING:
     pass  # No external type imports needed for v2

@@ -2,11 +2,11 @@
 
 from datetime import datetime
 
-from src.causal_frame import CausalFrame, FrameStatus
-from src.context_slice import ContextSlice
-from src.frame_index import FrameIndex
-from src.session_artifacts import FileRecord, SessionArtifacts
-from src.session_comparison import SessionDiff, compare_sessions
+from src.frame.causal_frame import CausalFrame, FrameStatus
+from src.frame.context_slice import ContextSlice
+from src.frame.frame_index import FrameIndex
+from src.session.session_artifacts import FileRecord, SessionArtifacts
+from src.session.session_comparison import SessionDiff, compare_sessions
 
 
 def make_artifacts(session_id: str, prompt: str, files: dict) -> SessionArtifacts:

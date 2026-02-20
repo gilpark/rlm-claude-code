@@ -13,25 +13,38 @@ Based on: Zhang et al., "Recursive Language Models" (2025)
 __version__ = "0.0.1"
 
 # REPL Layer
-from .rlaph_loop import RLAPHLoop, RLPALoopResult
-from .repl_environment import RLMEnvironment
-from .llm_client import LLMClient, LLMError
-from .tool_bridge import ToolBridge, ToolPermissions, ToolResult
+from .repl import (
+    LLMClient,
+    LLMError,
+    RLMEnvironment,
+    RLAPHLoop,
+    RLPALoopResult,
+    ToolBridge,
+    ToolPermissions,
+    ToolResult,
+)
 
-# Causal Layer
-from .causal_frame import CausalFrame, FrameStatus, compute_frame_id
-from .context_slice import ContextSlice
-from .frame_index import FrameIndex
-from .frame_invalidation import propagate_invalidation
-from .frame_store import FrameStore
-from .session_artifacts import SessionArtifacts, FileRecord
-from .session_comparison import SessionDiff, compare_sessions
-from .plugin_interface import CoreContext, RLMPlugin, PluginError
+# Frame Layer
+from .frame import (
+    CausalFrame,
+    ContextSlice,
+    FrameIndex,
+    FrameStore,
+    FrameStatus,
+    compute_frame_id,
+    propagate_invalidation,
+)
+
+# Session Layer
+from .session import FileRecord, SessionArtifacts, SessionDiff, compare_sessions
+
+# Plugin
+from .plugin_interface import CoreContext, PluginError, RLMPlugin
 
 # Types & Config
-from .types import SessionContext
 from .config import RLMConfig, default_config
-from .prompts import build_rlm_system_prompt
+from .repl.prompts import build_rlm_system_prompt
+from .types import SessionContext
 
 __all__ = [
     # REPL
@@ -43,7 +56,7 @@ __all__ = [
     "ToolBridge",
     "ToolPermissions",
     "ToolResult",
-    # Causal
+    # Frame
     "CausalFrame",
     "FrameStatus",
     "compute_frame_id",
@@ -51,10 +64,12 @@ __all__ = [
     "FrameIndex",
     "propagate_invalidation",
     "FrameStore",
+    # Session
     "SessionArtifacts",
     "FileRecord",
     "SessionDiff",
     "compare_sessions",
+    # Plugin
     "CoreContext",
     "RLMPlugin",
     "PluginError",
@@ -64,3 +79,4 @@ __all__ = [
     "default_config",
     "build_rlm_system_prompt",
 ]
+

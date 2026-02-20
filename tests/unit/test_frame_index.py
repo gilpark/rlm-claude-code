@@ -2,9 +2,9 @@
 
 from datetime import datetime
 
-from src.causal_frame import CausalFrame, FrameStatus
-from src.context_slice import ContextSlice
-from src.frame_index import FrameIndex
+from src.frame.causal_frame import CausalFrame, FrameStatus
+from src.frame.context_slice import ContextSlice
+from src.frame.frame_index import FrameIndex
 
 
 def make_frame(

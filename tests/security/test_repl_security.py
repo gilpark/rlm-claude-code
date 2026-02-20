@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.repl_environment import (
+from src.repl.repl_environment import (
     RLMEnvironment,
     RLMSecurityError,
     ALLOWED_SUBPROCESSES,

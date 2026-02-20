@@ -1,6 +1,6 @@
 """Tests for ContextSlice dataclass."""
 
-from src.context_slice import ContextSlice
+from src.frame.context_slice import ContextSlice
 
 
 def test_context_slice_hash_is_deterministic():

@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 import anthropic
 
 if TYPE_CHECKING:
-    from .config import RLMConfig
+    from ..config import RLMConfig
 
 
 class LLMError(Exception):
@@ -46,7 +46,7 @@ class LLMClient:
 
         # Load config if not provided
         if self.config is None:
-            from .config import RLMConfig
+            from ..config import RLMConfig
             self.config = RLMConfig.load()
 
     def _get_client(self) -> anthropic.Anthropic:

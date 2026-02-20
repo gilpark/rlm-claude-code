@@ -2,11 +2,11 @@
 
 from datetime import datetime
 
-from src.causal_frame import CausalFrame, FrameStatus
-from src.context_slice import ContextSlice
+from src.frame.causal_frame import CausalFrame, FrameStatus
+from src.frame.context_slice import ContextSlice
 from src.plugins.default_plugin import DefaultRLMPlugin
 from src.plugin_interface import CoreContext
-from src.session_artifacts import SessionArtifacts, FileRecord
+from src.session.session_artifacts import SessionArtifacts, FileRecord
 
 
 def make_test_frame() -> CausalFrame:

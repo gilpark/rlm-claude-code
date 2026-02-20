@@ -3,19 +3,12 @@
 import asyncio
 import pytest
 from pathlib import Path
-from src.rlaph_loop import RLAPHLoop
+from src.repl.rlaph_loop import RLAPHLoop
 from src.types import SessionContext
 
 
 class TestOrchestratorAccuracy:
     """Test orchestrator executes code correctly and doesn't hallucinate."""
-
-    @pytest.fixture
-    def event_loop(self):
-        """Create event loop for async tests."""
-        loop = asyncio.new_event_loop()
-        yield loop
-        loop.close()
 
     @pytest.mark.asyncio
     async def test_basic_math(self):

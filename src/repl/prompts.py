@@ -6,7 +6,7 @@ Implements: Spec §3.2 Root Prompt Structure
 
 from __future__ import annotations
 
-from .types import SessionContext
+from ..types import SessionContext
 
 
 def build_rlm_system_prompt(context: SessionContext, query: str) -> str:

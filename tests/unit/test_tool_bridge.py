@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.tool_bridge import (
+from src.repl.tool_bridge import (
     ToolAccessLevel,
     ToolBridge,
     ToolPermissions,

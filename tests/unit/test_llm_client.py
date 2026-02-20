@@ -1,7 +1,7 @@
 """Tests for LLMClient - simple synchronous LLM calls."""
 
 import pytest
-from src.llm_client import LLMClient, LLMError
+from src.repl.llm_client import LLMClient, LLMError
 
 
 class TestLLMClient:
