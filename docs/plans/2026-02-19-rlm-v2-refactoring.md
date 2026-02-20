@@ -1772,13 +1772,13 @@ As described in the whitepaper:
 - [ ] Reduce to target 12 files
 
 ### Phase 11: Cleanup Broken Scripts/Tests (P1) ✓ COMPLETE
-**See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
+**See:** `docs/CHANGELOG.md` for details
 - [x] Delete 7 broken scripts importing deleted modules
 - [x] Fix script imports (extract_frames.py, compare_sessions.py)
 - [x] Delete broken tests
 
 ### Phase 12: Fix RLM Orchestrator Hallucination (P0 - CRITICAL) ✓ COMPLETE
-**See:** `docs/plans/2026-02-19-phase11-12-cleanup-and-fix.md`
+**See:** `docs/CHANGELOG.md` for details
 
 **Problem:** The RLM orchestrator hallucinates - returns fake file names, ignores execution results.
 
@@ -1842,3 +1842,5 @@ As described in the whitepaper:
 
 *Based on: docs/plans/2026-02-19-design.md*
 *Whitepaper: docs/plans/2026-02-19-whitepaper.md*
+*Changelog: docs/CHANGELOG.md*
+*Roadmap: docs/ROADMAP.md*
