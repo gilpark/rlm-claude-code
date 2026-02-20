@@ -3,6 +3,9 @@
 
 Hook: Stop
 Purpose: Persist CausalFrame tree when session ends.
+
+This hook loads frames saved by RLAPHLoop and ensures they are
+persisted to the FrameStore for long-term storage.
 """
 
 import json
@@ -11,28 +14,50 @@ import sys
 from pathlib import Path
 
 # Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.frame.frame_store import FrameStore
-from src.frame.frame_index import FrameIndex
+from frame.frame_store import FrameStore
+from frame.frame_index import FrameIndex
 
 
-def extract_frames(session_id: str, index: FrameIndex) -> None:
-    """Extract all frames from index and save to FrameStore."""
+def extract_frames(session_id: str) -> dict:
+    """
+    Extract frames from saved index and persist to FrameStore.
+
+    Args:
+        session_id: The session identifier
+
+    Returns:
+        Dict with status and frame count
+    """
+    # Load frames from index (saved by RLAPHLoop)
+    index = FrameIndex.load(session_id)
+
+    if len(index) == 0:
+        return {"status": "no_frames", "count": 0, "session_id": session_id}
+
+    # Create session directory
     session_dir = Path.home() / ".claude" / "rlm-frames" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save to FrameStore (JSONL format)
     store_path = session_dir / "frames.jsonl"
     store = FrameStore(path=store_path)
 
     for frame in index.values():
         store.save(frame)
 
-    print(f"Saved {len(index)} frames to {store_path}")
+    return {
+        "status": "success",
+        "count": len(index),
+        "session_id": session_id,
+        "store_path": str(store_path),
+    }
 
 
 def main():
     """Main entry point for hook."""
-    # Read hook input from stdin to get session_id
+    # Read hook input from stdin
     hook_data = {}
     try:
         stdin_data = sys.stdin.read().strip()
@@ -41,22 +66,13 @@ def main():
     except json.JSONDecodeError:
         pass
 
-    session_id = hook_data.get("session_id", os.environ.get("CLAUDE_SESSION_ID", "unknown"))
+    session_id = hook_data.get("session_id", os.environ.get("CLAUDE_SESSION_ID", "default"))
 
-    # For now, this is a placeholder - the actual frame extraction
-    # would come from the running session's FrameIndex
-    # In production, this would receive the frame data via stdin
+    # Extract and persist frames
+    result = extract_frames(session_id)
 
-    print(f"Frame extraction hook called for session: {session_id}")
-
-    # Read frame data from stdin if provided
-    try:
-        input_data = sys.stdin.read()
-        if input_data:
-            data = json.loads(input_data)
-            print(f"Received {len(data.get('frames', []))} frames")
-    except json.JSONDecodeError:
-        pass
+    # Output result for debugging
+    print(json.dumps(result))
 
     sys.exit(0)
 
