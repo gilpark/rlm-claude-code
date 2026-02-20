@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .causal_frame import CausalFrame, FrameStatus
 
+from .causal_frame import FrameStatus
+
 
 @dataclass
 class FrameIndex:
@@ -27,18 +29,24 @@ class FrameIndex:
     _dependent_cache: dict[str, set[str]] = field(default_factory=dict)  # For B4
 
     def add(self, frame: "CausalFrame") -> None:
-        """Add a frame to the index and update parent's children list."""
+        """Add a frame to the index, update parent's children and evidence."""
         self._frames[frame.frame_id] = frame
 
         # Invalidate dependent cache when frames change
         self._dependent_cache.clear()
 
-        # Update parent's children list (defensive)
+        # Update parent's children list and evidence
         if frame.parent_id and frame.parent_id in self._frames:
             parent = self._frames[frame.parent_id]
+
+            # Add to children (defensive)
             if frame.frame_id not in parent.children:
                 parent.children.append(frame.frame_id)
-            # else: already added (idempotent, no-op)
+
+            # Add to evidence only if child completed successfully
+            if frame.status == FrameStatus.COMPLETED:
+                if frame.frame_id not in parent.evidence:
+                    parent.evidence.append(frame.frame_id)
 
     def get(self, frame_id: str) -> "CausalFrame | None":
         """Get a frame by ID, or None if not found."""
@@ -66,6 +74,36 @@ class FrameIndex:
         """Find all PROMOTED frames (persisted facts)."""
         from .causal_frame import FrameStatus
         return [f for f in self._frames.values() if f.status == FrameStatus.PROMOTED]
+
+    def find_dependent_frames(self, frame_id: str) -> set[str]:
+        """
+        Find all frames that depend on a given frame.
+
+        Dependents include:
+        - Children (frames with this frame as parent_id)
+        - Evidence consumers (frames citing this frame in evidence list)
+
+        Results are cached for O(1) lookup until frames change.
+        """
+        # Check cache
+        if frame_id in self._dependent_cache:
+            return self._dependent_cache[frame_id].copy()
+
+        dependents = set()
+
+        for fid, frame in self._frames.items():
+            # Check if child
+            if frame.parent_id == frame_id:
+                dependents.add(fid)
+
+            # Check if cites as evidence
+            if frame_id in frame.evidence:
+                dependents.add(fid)
+
+        # Cache result
+        self._dependent_cache[frame_id] = dependents
+
+        return dependents.copy()
 
     def __contains__(self, frame_id: str) -> bool:
         return frame_id in self._frames
