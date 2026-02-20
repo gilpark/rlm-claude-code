@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="RestrictedPython")
 
 from ..config import RLMConfig, default_config
-from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id
+from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id, generate_invalidation_condition
 from ..frame.context_map import ContextMap
 from ..frame.context_slice import ContextSlice
 from ..frame.frame_index import FrameIndex
@@ -286,7 +286,7 @@ class RLAPHLoop:
                         evidence=self._collect_evidence(),
                         conclusion=str(exec_result.output)[:500] if exec_result.success else None,
                         confidence=0.8,  # Default, can be updated
-                        invalidation_condition="",
+                        invalidation_condition=generate_invalidation_condition(context_slice),
                         status=FrameStatus.COMPLETED if exec_result.success else FrameStatus.INVALIDATED,
                         branched_from=None,
                         escalation_reason=exec_result.error if not exec_result.success else None,
@@ -436,7 +436,7 @@ class RLAPHLoop:
             evidence=self._collect_evidence(),
             conclusion=result[:500] if result else None,
             confidence=0.8,  # Default, can be updated
-            invalidation_condition="",
+            invalidation_condition=generate_invalidation_condition(context_slice),
             status=FrameStatus.COMPLETED,
             branched_from=None,
             escalation_reason=None,

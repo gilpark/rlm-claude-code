@@ -6,6 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -68,3 +69,29 @@ def compute_frame_id(
     """
     content = f"{parent_id}:{query}:{context_slice.hash()}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+
+def generate_invalidation_condition(context_slice: "ContextSlice") -> str:
+    """Generate default invalidation condition from context_slice."""
+    parts = []
+
+    if context_slice.files:
+        filenames = [Path(p).name for p in context_slice.files.keys()]
+        if len(filenames) == 1:
+            parts.append(f"{filenames[0]} changes or is deleted")
+        else:
+            shown = filenames[:3]
+            more = f" (+{len(filenames) - 3} more)" if len(filenames) > 3 else ""
+            parts.append(f"any of {len(filenames)} files ({', '.join(shown)}{more}) change")
+
+    if context_slice.tool_outputs:
+        tool_names = list(context_slice.tool_outputs.keys())
+        parts.append(f"tool results from {', '.join(tool_names)} change")
+
+    if context_slice.memory_refs:
+        parts.append(f"memory entries change")
+
+    if not parts:
+        return "No automatic invalidation condition"
+
+    return "; or ".join(parts)
