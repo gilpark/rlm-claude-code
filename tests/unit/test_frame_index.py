@@ -1,6 +1,10 @@
 """Tests for FrameIndex class."""
 
+import json
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from src.frame.causal_frame import CausalFrame, FrameStatus
 from src.frame.context_slice import ContextSlice
@@ -142,3 +146,79 @@ def test_frame_index_find_promoted():
     assert len(promoted) == 2
     promoted_ids = {f.frame_id for f in promoted}
     assert promoted_ids == {"p1", "p2"}
+
+
+class TestFrameIndexPersistence:
+    """Tests for FrameIndex save/load persistence."""
+
+    @pytest.fixture
+    def sample_frame(self):
+        """Create a sample CausalFrame for testing."""
+        context_slice = ContextSlice(
+            files={"test.py": "abc123"},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+        return CausalFrame(
+            frame_id="test_frame_1",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="test query",
+            context_slice=context_slice,
+            evidence=[],
+            conclusion="test conclusion",
+            confidence=0.9,
+            invalidation_condition="file changes",
+            status=FrameStatus.COMPLETED,
+            branched_from=None,
+            escalation_reason=None,
+            created_at=datetime.now(),
+            completed_at=datetime.now(),
+        )
+
+    def test_save_to_file(self, tmp_path, sample_frame):
+        """FrameIndex.save persists frames to JSON file."""
+        index = FrameIndex()
+        index.add(sample_frame)
+
+        save_path = index.save("test_session", base_dir=tmp_path)
+
+        assert save_path.exists()
+        assert save_path.name == "index.json"
+
+        # Verify content
+        with open(save_path) as f:
+            data = json.load(f)
+        assert "frames" in data
+        assert len(data["frames"]) == 1
+
+    def test_load_from_file(self, tmp_path, sample_frame):
+        """FrameIndex.load reconstructs frames from JSON file."""
+        # First save
+        index = FrameIndex()
+        index.add(sample_frame)
+        index.save("test_session", base_dir=tmp_path)
+
+        # Then load
+        loaded = FrameIndex.load("test_session", base_dir=tmp_path)
+
+        assert len(loaded) == 1
+        frame = loaded.get("test_frame_1")
+        assert frame is not None
+        assert frame.query == "test query"
+        assert frame.status == FrameStatus.COMPLETED
+
+    def test_load_nonexistent_returns_empty(self, tmp_path):
+        """FrameIndex.load returns empty index if no file exists."""
+        index = FrameIndex.load("nonexistent", base_dir=tmp_path)
+        assert len(index) == 0
+
+    def test_save_empty_index(self, tmp_path):
+        """FrameIndex.save handles empty index gracefully."""
+        index = FrameIndex()
+        index.save("empty_session", base_dir=tmp_path)
+
+        loaded = FrameIndex.load("empty_session", base_dir=tmp_path)
+        assert len(loaded) == 0

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -62,3 +65,116 @@ class FrameIndex:
     def values(self) -> list["CausalFrame"]:
         """Return all frames."""
         return list(self._frames.values())
+
+    def save(self, session_id: str, base_dir: Path | None = None) -> Path:
+        """
+        Save frame index to JSON file.
+
+        Args:
+            session_id: Session identifier for the file name
+            base_dir: Optional base directory (default: ~/.claude/rlm-frames/)
+
+        Returns:
+            Path to the saved file
+        """
+        if base_dir is None:
+            base_dir = Path.home() / ".claude" / "rlm-frames" / session_id
+        else:
+            base_dir = base_dir / session_id
+
+        base_dir.mkdir(parents=True, exist_ok=True)
+        save_path = base_dir / "index.json"
+
+        # Serialize frames
+        frames_data = []
+        for frame in self._frames.values():
+            frame_dict = {
+                "frame_id": frame.frame_id,
+                "depth": frame.depth,
+                "parent_id": frame.parent_id,
+                "children": frame.children,
+                "query": frame.query,
+                "context_slice": {
+                    "files": frame.context_slice.files,
+                    "memory_refs": frame.context_slice.memory_refs,
+                    "tool_outputs": frame.context_slice.tool_outputs,
+                    "token_budget": frame.context_slice.token_budget,
+                },
+                "evidence": frame.evidence,
+                "conclusion": frame.conclusion,
+                "confidence": frame.confidence,
+                "invalidation_condition": frame.invalidation_condition,
+                "status": frame.status.value,
+                "branched_from": frame.branched_from,
+                "escalation_reason": frame.escalation_reason,
+                "created_at": frame.created_at.isoformat() if frame.created_at else None,
+                "completed_at": frame.completed_at.isoformat() if frame.completed_at else None,
+            }
+            frames_data.append(frame_dict)
+
+        data = {
+            "session_id": session_id,
+            "frames": frames_data,
+            "saved_at": datetime.now().isoformat(),
+        }
+
+        with open(save_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        return save_path
+
+    @classmethod
+    def load(cls, session_id: str, base_dir: Path | None = None) -> "FrameIndex":
+        """
+        Load frame index from JSON file.
+
+        Args:
+            session_id: Session identifier to load
+            base_dir: Optional base directory (default: ~/.claude/rlm-frames/)
+
+        Returns:
+            FrameIndex with loaded frames (empty if file doesn't exist)
+        """
+        from .causal_frame import CausalFrame, FrameStatus
+        from .context_slice import ContextSlice
+
+        if base_dir is None:
+            base_dir = Path.home() / ".claude" / "rlm-frames"
+
+        load_path = base_dir / session_id / "index.json"
+
+        if not load_path.exists():
+            return cls()
+
+        with open(load_path) as f:
+            data = json.load(f)
+
+        index = cls()
+        for frame_dict in data.get("frames", []):
+            context_slice = ContextSlice(
+                files=frame_dict["context_slice"]["files"],
+                memory_refs=frame_dict["context_slice"]["memory_refs"],
+                tool_outputs=frame_dict["context_slice"]["tool_outputs"],
+                token_budget=frame_dict["context_slice"]["token_budget"],
+            )
+
+            frame = CausalFrame(
+                frame_id=frame_dict["frame_id"],
+                depth=frame_dict["depth"],
+                parent_id=frame_dict["parent_id"],
+                children=frame_dict["children"],
+                query=frame_dict["query"],
+                context_slice=context_slice,
+                evidence=frame_dict["evidence"],
+                conclusion=frame_dict["conclusion"],
+                confidence=frame_dict["confidence"],
+                invalidation_condition=frame_dict["invalidation_condition"],
+                status=FrameStatus(frame_dict["status"]),
+                branched_from=frame_dict.get("branched_from"),
+                escalation_reason=frame_dict.get("escalation_reason"),
+                created_at=datetime.fromisoformat(frame_dict["created_at"]) if frame_dict.get("created_at") else None,
+                completed_at=datetime.fromisoformat(frame_dict["completed_at"]) if frame_dict.get("completed_at") else None,
+            )
+            index.add(frame)
+
+        return index
