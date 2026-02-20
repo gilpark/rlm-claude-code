@@ -45,3 +45,47 @@ def test_session_artifacts_creation():
     assert artifacts.files["auth_test.py"].role == "modified"
     assert artifacts.root_frame_id == "frame-root"
     assert artifacts.conversation_log == "/path/to/transcript.json"
+
+
+class TestSessionArtifactsPersistence:
+    """Tests for SessionArtifacts save/load."""
+
+    def test_save_to_file(self, tmp_path):
+        """SessionArtifacts.save persists to JSON file."""
+        artifacts = SessionArtifacts(
+            session_id="test-session",
+            initial_prompt="Fix the bug",
+            files={"auth.py": FileRecord("auth.py", "abc123", "read")},
+            root_frame_id="frame-001",
+            conversation_log="/path/to/log.json",
+        )
+
+        save_path = artifacts.save(base_dir=tmp_path)
+
+        assert save_path.exists()
+        assert save_path.name == "artifacts.json"
+
+    def test_load_from_file(self, tmp_path):
+        """SessionArtifacts.load reconstructs from JSON file."""
+        # First save
+        artifacts = SessionArtifacts(
+            session_id="test-session",
+            initial_prompt="Fix the bug",
+            files={"auth.py": FileRecord("auth.py", "abc123", "read")},
+            root_frame_id="frame-001",
+            conversation_log="/path/to/log.json",
+        )
+        artifacts.save(base_dir=tmp_path)
+
+        # Then load
+        loaded = SessionArtifacts.load("test-session", base_dir=tmp_path)
+
+        assert loaded.session_id == "test-session"
+        assert loaded.initial_prompt == "Fix the bug"
+        assert "auth.py" in loaded.files
+        assert loaded.files["auth.py"].hash == "abc123"
+
+    def test_load_nonexistent_returns_none(self, tmp_path):
+        """SessionArtifacts.load returns None if file doesn't exist."""
+        loaded = SessionArtifacts.load("nonexistent", base_dir=tmp_path)
+        assert loaded is None
