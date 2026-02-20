@@ -15,22 +15,27 @@ This is a Claude Code plugin that provides **causal awareness** through REPL-bas
 
 ```
 src/
-├── rlaph_loop.py          # Main execution loop - REPL orchestration
-├── repl_environment.py    # REPL sandbox with RestrictedPython
-├── llm_client.py          # Synchronous LLM client with model cascade
-├── tool_bridge.py         # Controlled tool access for sub-LLMs
-├── causal_frame.py        # CausalFrame dataclass (query, context, conclusion, invalidation)
-├── context_slice.py       # Context window management
-├── frame_index.py         # In-memory frame index
-├── frame_invalidation.py  # Cascade invalidation logic
-├── frame_store.py         # JSONL persistence
-├── session_artifacts.py   # Session metadata
-├── session_comparison.py  # Cross-session diff
-├── plugin_interface.py    # Claude Code plugin interface
-├── config.py              # Configuration management
-├── prompts.py             # System prompts
-├── types.py               # Shared types
-└── __init__.py            # Public API exports
+├── repl/                      # REPL Layer
+│   ├── rlaph_loop.py          # Main execution loop
+│   ├── repl_environment.py    # REPL sandbox with RestrictedPython
+│   ├── llm_client.py          # Synchronous LLM client with model cascade
+│   ├── tool_bridge.py         # Controlled tool access for sub-LLMs
+│   ├── response_parser.py     # Parse LLM responses
+│   └── prompts.py             # System prompts
+├── frame/                     # CausalFrame Layer
+│   ├── causal_frame.py        # CausalFrame dataclass (query, context, conclusion, invalidation)
+│   ├── context_slice.py       # Context window management
+│   ├── frame_index.py         # In-memory frame index
+│   ├── frame_invalidation.py  # Cascade invalidation logic
+│   └── frame_store.py         # JSONL persistence
+├── session/                   # Session Layer
+│   ├── session_artifacts.py   # Session metadata
+│   └── session_comparison.py  # Cross-session diff
+├── config.py                  # Configuration management
+├── types.py                   # Shared types
+├── tokenization.py            # Token counting
+├── plugin_interface.py        # Claude Code plugin interface
+└── __init__.py                # Public API exports
 ```
 
 ## Core Commands
