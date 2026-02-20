@@ -20,6 +20,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -45,6 +46,15 @@ def capture_output():
     session_id = hook_data.get("session_id", "default")
     session_dir = Path.home() / ".claude" / "rlm-frames" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
+
+    # Also save to coordination file for orchestrator
+    session_file = Path.home() / ".claude" / "rlm-frames" / ".current_session"
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    session_file.write_text(json.dumps({
+        "session_id": session_id,
+        "pid": os.getpid(),
+        "updated_at": datetime.now().isoformat(),
+    }))
 
     # Extract tool info
     tool_name = hook_data.get("tool_name", "")
