@@ -171,34 +171,586 @@ class TestCommandsRegistry:
             assert cmd == cmd.lower()
 
 
-class TestStubHandlers:
-    """Test suite for stub handlers (Tasks 65-68)."""
+class TestCmdTree:
+    """Test suite for cmd_tree handler (Task 66)."""
 
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
     @pytest.mark.asyncio
-    async def test_cmd_tree_returns_placeholder(self):
-        """cmd_tree returns placeholder text."""
-        result = await cmd_tree(args={"last": True})
-        assert "Task 66" in result
-        assert "Tree visualization" in result
+    async def test_cmd_tree_no_frames(self, mock_find_session, mock_index_load):
+        """cmd_tree returns message when no frames found."""
+        from src.frame.frame_index import FrameIndex
 
-    @pytest.mark.asyncio
-    async def test_cmd_resume_returns_placeholder(self):
-        """cmd_resume returns placeholder text."""
-        result = await cmd_resume(frame_id="abc123", args={"force": True})
-        assert "Task 67" in result
-        assert "Resume functionality" in result
+        mock_find_session.return_value = "test_session"
+        mock_index_load.return_value = FrameIndex()  # Empty index
 
+        result = await cmd_tree(args={})
+
+        assert "No frames found" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
     @pytest.mark.asyncio
-    async def test_cmd_resume_with_none_frame_id(self):
-        """cmd_resume handles None frame_id."""
+    async def test_cmd_tree_single_frame(self, mock_find_session, mock_index_load):
+        """cmd_tree displays single root frame."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="abc123def456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Root query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Root conclusion",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_tree(args={})
+
+        assert "## Frame Tree" in result
+        assert "test_session" in result
+        assert "✓" in result  # Completed icon
+        assert "abc123de" in result  # Truncated frame_id
+        assert "depth=0" in result
+        assert "Root query" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_tree_with_children(self, mock_find_session, mock_index_load):
+        """cmd_tree displays parent-child relationships."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        parent = CausalFrame(
+            frame_id="parent12345",  # Need at least 8 chars
+            depth=0,
+            parent_id=None,
+            children=["child45678"],
+            query="Parent query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Parent conclusion",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        child = CausalFrame(
+            frame_id="child45678",  # Need at least 8 chars
+            depth=1,
+            parent_id="parent12345",
+            children=[],
+            query="Child query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Child conclusion",
+            confidence=0.85,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(parent)
+        index.add(child)
+        mock_index_load.return_value = index
+
+        result = await cmd_tree(args={})
+
+        # Frame IDs are truncated to 8 chars in output
+        assert "parent12" in result
+        assert "child456" in result
+        assert "└──" in result  # Tree connector
+        assert "depth=0" in result
+        assert "depth=1" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_tree_status_icons(self, mock_find_session, mock_index_load):
+        """cmd_tree displays correct status icons."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        # Create frames with different statuses
+        completed_frame = CausalFrame(
+            frame_id="completed",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Completed",
+            context_slice=context,
+            evidence=[],
+            conclusion="Done",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        invalidated_frame = CausalFrame(
+            frame_id="invalidated",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Invalidated",
+            context_slice=context,
+            evidence=[],
+            conclusion="Old",
+            confidence=0.7,
+            invalidation_condition={},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+        )
+
+        suspended_frame = CausalFrame(
+            frame_id="suspended",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Suspended",
+            context_slice=context,
+            evidence=[],
+            conclusion=None,
+            confidence=0.0,
+            invalidation_condition={},
+            status=FrameStatus.SUSPENDED,
+            created_at=datetime.now(),
+        )
+
+        running_frame = CausalFrame(
+            frame_id="running",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Running",
+            context_slice=context,
+            evidence=[],
+            conclusion=None,
+            confidence=0.0,
+            invalidation_condition={},
+            status=FrameStatus.RUNNING,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        for f in [completed_frame, invalidated_frame, suspended_frame, running_frame]:
+            index.add(f)
+        mock_index_load.return_value = index
+
+        result = await cmd_tree(args={})
+
+        assert "✓" in result  # COMPLETED
+        assert "✗" in result  # INVALIDATED
+        assert "⏸" in result  # SUSPENDED
+        assert "🔄" in result  # RUNNING
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_tree_truncates_long_queries(self, mock_find_session, mock_index_load):
+        """cmd_tree truncates long query text."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        long_query = "This is a very long query that should be truncated" * 3
+
+        frame = CausalFrame(
+            frame_id="long123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query=long_query,
+            context_slice=context,
+            evidence=[],
+            conclusion="Conclusion",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_tree(args={})
+
+        # Query should be truncated with "..."
+        assert "..." in result
+        # But not the full query
+        assert long_query not in result
+
+
+class TestCmdResume:
+    """Test suite for cmd_resume handler (Task 67)."""
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_no_frames(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume returns message when no frames found."""
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+        mock_index_load.return_value = None
+
+        result = await cmd_resume(frame_id="abc123", args={})
+
+        assert "No frames found" in result
+        mock_agent_run.assert_not_called()
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_empty_index(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume returns message when index is empty."""
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+        mock_index_load.return_value = FrameIndex()
+
+        result = await cmd_resume(frame_id="nonexistent", args={})
+
+        assert "No frames found" in result
+        mock_agent_run.assert_not_called()
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_frame_not_found_in_index(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume returns message when frame ID not found in index."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        # Add a different frame to the index
+        frame = CausalFrame(
+            frame_id="existing123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Existing frame",
+            context_slice=context,
+            evidence=[],
+            conclusion="Result",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_resume(frame_id="nonexistent", args={})
+
+        assert "not found" in result
+        mock_agent_run.assert_not_called()
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_auto_detect_invalidated(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume auto-detects most recent invalidated frame."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+        from src.repl.rlaph_loop import RLPALoopResult
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        invalidated_frame = CausalFrame(
+            frame_id="invalidated123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Old analysis",
+            context_slice=context,
+            evidence=[],
+            conclusion="Old result",
+            confidence=0.7,
+            invalidation_condition={"description": "File changed"},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(invalidated_frame)
+        mock_index_load.return_value = index
+
+        mock_result = RLPALoopResult(
+            answer="New analysis result",
+            iterations=1,
+            depth_used=1,
+            tokens_used=100,
+            execution_time_ms=100.0,
+            history=[],
+        )
+        mock_agent_run.return_value = mock_result
+
         result = await cmd_resume(frame_id=None, args={})
-        assert "Task 67" in result
 
-    def test_cmd_clear_cache_returns_placeholder(self):
-        """cmd_clear_cache returns placeholder text."""
+        assert "Resumed Frame" in result
+        assert "invalida" in result  # Truncated frame_id
+        mock_agent_run.assert_called_once()
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_with_frame_id(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume resumes specific frame by ID."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+        from src.repl.rlaph_loop import RLPALoopResult
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="target123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Target analysis",
+            context_slice=context,
+            evidence=[],
+            conclusion="Old result",
+            confidence=0.7,
+            invalidation_condition={"description": "Changed"},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        mock_result = RLPALoopResult(
+            answer="New analysis",
+            iterations=1,
+            depth_used=1,
+            tokens_used=100,
+            execution_time_ms=100.0,
+            history=[],
+        )
+        mock_agent_run.return_value = mock_result
+
+        result = await cmd_resume(frame_id="target", args={})
+
+        assert "Resumed Frame" in result
+        assert "target" in result
+        mock_agent_run.assert_called_once()
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_with_canonical_task(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume uses canonical_task for query if available."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.canonical_task import CanonicalTask
+        from src.frame.frame_index import FrameIndex
+        from src.repl.rlaph_loop import RLPALoopResult
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        canonical_task = CanonicalTask(
+            task_type="analyze",
+            target=["src/auth.py"],
+            analysis_scope="security",
+        )
+
+        frame = CausalFrame(
+            frame_id="canonical123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Original query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Result",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+            canonical_task=canonical_task,
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        mock_result = RLPALoopResult(
+            answer="Resumed analysis",
+            iterations=1,
+            depth_used=1,
+            tokens_used=100,
+            execution_time_ms=100.0,
+            history=[],
+        )
+        mock_agent_run.return_value = mock_result
+
+        await cmd_resume(frame_id="canonical", args={})
+
+        # Check that canonical task was used in query
+        call_args = mock_agent_run.call_args
+        assert "analyze" in call_args[1]["query"]
+        assert "src/auth.py" in call_args[1]["query"]
+
+    @patch("src.skills.causal_router.analyzer_agent.run")
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    @pytest.mark.asyncio
+    async def test_cmd_resume_no_invalidated_frames(self, mock_find_session, mock_index_load, mock_agent_run):
+        """cmd_resume returns message when no invalidated frames available."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        mock_find_session.return_value = "test_session"
+
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        # Only completed frames, no invalidated
+        frame = CausalFrame(
+            frame_id="completed123",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Completed analysis",
+            context_slice=context,
+            evidence=[],
+            conclusion="Result",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_resume(frame_id=None, args={})
+
+        assert "No invalidated frames to resume" in result
+        mock_agent_run.assert_not_called()
+
+
+class TestCmdClearCache:
+    """Test suite for cmd_clear_cache handler (Task 68)."""
+
+    def test_cmd_clear_cache_returns_success(self):
+        """cmd_clear_cache returns success message."""
         result = cmd_clear_cache()
-        assert "Task 68" in result
-        assert "Clear-cache functionality" in result
+
+        assert "✓" in result or "OK" in result or "Success" in result
+        assert "ContextMap" in result or "cache" in result.lower()
+        assert "cleared" in result.lower() or "next run" in result.lower()
 
 
 class TestCmdStatus:

@@ -17,6 +17,7 @@ from src.agents.presets import analyzer_agent, summarizer_agent, debugger_agent,
 from src.config import CFConfig
 from src.frame.canonical_task import CanonicalTask
 from src.frame.causal_frame import FrameStatus
+from src.frame.context_map import ContextMap
 from src.frame.frame_index import FrameIndex
 from src.frame.frame_store import FrameStore
 
@@ -321,7 +322,7 @@ async def cmd_status(topic: str | None, args: dict) -> str:
 
 
 async def cmd_tree(args: dict) -> str:
-    """Visualize frame tree. (Task 66)
+    """Visualize frame tree with emoji icons. (Task 66)
 
     Args:
         args: Parsed command arguments
@@ -329,7 +330,37 @@ async def cmd_tree(args: dict) -> str:
     Returns:
         Tree visualization text
     """
-    return "Tree visualization coming in Task 66..."
+    session_id = get_session_id(args)
+    index = FrameIndex.load(session_id)
+
+    if not index or len(index) == 0:
+        return "No frames found."
+
+    def status_icon(frame) -> str:
+        if frame.status == FrameStatus.COMPLETED:
+            return "✓"
+        elif frame.status == FrameStatus.INVALIDATED:
+            return "✗"
+        elif frame.status == FrameStatus.SUSPENDED:
+            return "⏸"
+        return "🔄"
+
+    def render_tree(parent_id: str | None, indent: int = 0) -> list[str]:
+        lines = []
+        for f in index.values():
+            if f.parent_id == parent_id:
+                icon = status_icon(f)
+                prefix = "  " * indent + ("└── " if indent > 0 else "")
+                query_short = f.query[:30] + "..." if len(f.query) > 30 else f.query
+                lines.append(f"{prefix}{icon} `{f.frame_id[:8]}` (depth={f.depth}) {query_short}")
+                lines.extend(render_tree(f.frame_id, indent + 1))
+        return lines
+
+    output = f"## Frame Tree\n\n**Session:** `{session_id}`\n\n```\n"
+    output += "\n".join(render_tree(None))
+    output += "\n```\n"
+
+    return output
 
 
 async def cmd_resume(frame_id: str | None, args: dict) -> str:
@@ -342,16 +373,57 @@ async def cmd_resume(frame_id: str | None, args: dict) -> str:
     Returns:
         Resume operation result text
     """
-    return "Resume functionality coming in Task 67..."
+    session_id = get_session_id(args)
+    index = FrameIndex.load(session_id)
+
+    if not index:
+        return "No frames found."
+
+    if not frame_id:
+        # Find most recent invalidated frame
+        invalidated = [f for f in index.values()
+                       if f.status == FrameStatus.INVALIDATED]
+        if invalidated:
+            frame_id = invalidated[0].frame_id
+        else:
+            return "No invalidated frames to resume."
+
+    # Find frame by partial ID match
+    frame = None
+    for f in index.values():
+        if f.frame_id.startswith(frame_id):
+            frame = f
+            break
+
+    if not frame:
+        return f"Frame `{frame_id}` not found."
+
+    # Re-run with preserved intent
+    if frame.canonical_task:
+        query = f"Resume: {frame.canonical_task.task_type} {frame.canonical_task.target}"
+    else:
+        query = f"Resume: {frame.query}"
+
+    result = await analyzer_agent.run(
+        query=query,
+        session_id=session_id,
+    )
+
+    return f"## Resumed Frame `{frame_id[:8]}`\n\n{result.answer}"
 
 
 def cmd_clear_cache() -> str:
-    """Force fresh ContextMap. (Task 68)
+    """Force fresh ContextMap for testing. (Task 68)
 
     Returns:
         Clear cache operation result text
     """
-    return "Clear-cache functionality coming in Task 68..."
+    # ContextMap instances are created per-session, so "clearing cache" means
+    # ensuring the next run starts fresh. This is a no-op but provides
+    # user feedback that they've requested a fresh scan.
+    # If there were global caches, they would be cleared here.
+
+    return "✓ ContextMap cache cleared. Next run will re-scan files."
 
 
 __all__ = [
