@@ -15,7 +15,13 @@ def test_single_file() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "file.py changes or is deleted"
+    assert isinstance(result, dict)
+    assert "files" in result
+    assert "tools" in result
+    assert "memory_refs" in result
+    assert "description" in result
+    assert result["files"] == ["/path/to/file.py"]
+    assert result["description"] == "file.py changes or is deleted"
 
 
 def test_multiple_files() -> None:
@@ -33,7 +39,10 @@ def test_multiple_files() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "any of 3 files (file.py, file.py, file.py) change"
+    assert isinstance(result, dict)
+    assert len(result["files"]) == 3
+    assert "any of 3 files" in result["description"]
+    assert "file.py" in result["description"]
 
 
 def test_multiple_files_with_more() -> None:
@@ -53,7 +62,10 @@ def test_multiple_files_with_more() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "any of 5 files (file1.py, file2.py, file3.py (+2 more)) change"
+    assert isinstance(result, dict)
+    assert len(result["files"]) == 5
+    assert "any of 5 files" in result["description"]
+    assert "(+2 more)" in result["description"]
 
 
 def test_empty_context() -> None:
@@ -67,7 +79,11 @@ def test_empty_context() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "No automatic invalidation condition"
+    assert isinstance(result, dict)
+    assert result["files"] == []
+    assert result["tools"] == []
+    assert result["memory_refs"] == []
+    assert result["description"] == "No automatic invalidation condition"
 
 
 def test_tool_outputs() -> None:
@@ -81,7 +97,9 @@ def test_tool_outputs() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "tool results from grep change"
+    assert isinstance(result, dict)
+    assert result["tools"] == ["grep"]
+    assert result["description"] == "tool results from grep change"
 
 
 def test_multiple_tool_outputs() -> None:
@@ -95,7 +113,10 @@ def test_multiple_tool_outputs() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "tool results from grep, find change"
+    assert isinstance(result, dict)
+    assert set(result["tools"]) == {"grep", "find"}
+    assert "grep" in result["description"]
+    assert "find" in result["description"]
 
 
 def test_memory_refs() -> None:
@@ -109,7 +130,9 @@ def test_memory_refs() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "memory entries change"
+    assert isinstance(result, dict)
+    assert result["memory_refs"] == ["mem1", "mem2"]
+    assert result["description"] == "memory entries change"
 
 
 def test_combined_files_and_tools() -> None:
@@ -123,7 +146,11 @@ def test_combined_files_and_tools() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    assert result == "file.py changes or is deleted; or tool results from grep change"
+    assert isinstance(result, dict)
+    assert result["files"] == ["/path/to/file.py"]
+    assert result["tools"] == ["grep"]
+    assert "file.py changes or is deleted" in result["description"]
+    assert "tool results from grep change" in result["description"]
 
 
 def test_all_components() -> None:
@@ -137,5 +164,10 @@ def test_all_components() -> None:
 
     result = generate_invalidation_condition(context_slice)
 
-    expected = "file.py changes or is deleted; or tool results from grep change; or memory entries change"
-    assert result == expected
+    assert isinstance(result, dict)
+    assert result["files"] == ["/path/to/file.py"]
+    assert result["tools"] == ["grep"]
+    assert result["memory_refs"] == ["mem1"]
+    assert "file.py changes or is deleted" in result["description"]
+    assert "tool results from grep change" in result["description"]
+    assert "memory entries change" in result["description"]

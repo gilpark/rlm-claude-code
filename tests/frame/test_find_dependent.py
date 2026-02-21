@@ -27,7 +27,7 @@ def _make_frame(
         evidence=evidence or [],
         conclusion=f"conclusion for {frame_id}",
         confidence=0.8,
-        invalidation_condition="",
+        invalidation_condition={},
         status=status,
         branched_from=None,
         escalation_reason=None,

@@ -58,7 +58,7 @@ def make_frame(
         evidence=evidence or [],
         conclusion=f"conclusion for {frame_id}",
         confidence=0.8,
-        invalidation_condition=f"test invalidation for {frame_id}",
+        invalidation_condition={"description": f"test invalidation for {frame_id}"},
         status=FrameStatus.COMPLETED,
         branched_from=None,
         escalation_reason=None,

@@ -26,7 +26,7 @@ def make_frame_with_children(
         evidence=evidence or [],
         conclusion=None,
         confidence=0.8,
-        invalidation_condition="test",
+        invalidation_condition={},
         status=FrameStatus.COMPLETED,
         branched_from=None,
         escalation_reason=None,

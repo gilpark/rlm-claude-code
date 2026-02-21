@@ -18,7 +18,7 @@ def make_frame(frame_id: str, parent_id: str = None, status: FrameStatus = Frame
         evidence=[],
         conclusion=f"conclusion_{frame_id}",
         confidence=0.8,
-        invalidation_condition="",
+        invalidation_condition={},
         status=status,
         branched_from=None,
         escalation_reason=None,

@@ -22,7 +22,7 @@ def make_test_frame() -> CausalFrame:
         evidence=[],
         conclusion=None,
         confidence=0.8,
-        invalidation_condition="test",
+        invalidation_condition={},
         status=FrameStatus.RUNNING,
         branched_from=None,
         escalation_reason=None,
