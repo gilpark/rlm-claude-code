@@ -19,7 +19,7 @@ import warnings
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncIterable
 
 # Suppress third-party warnings at import time
 warnings.filterwarnings("ignore", category=UserWarning, module="cpmpy")
@@ -724,8 +724,106 @@ Working memory: working_memory dict for storing results across code blocks"""
         return await self.repl.read_files_async(paths)
 
 
+async def run_rlaph(
+    query: str,
+    working_dir: Path | str | None = None,
+    session_id: str | None = None,
+    max_depth: int = 3,
+    verbose: bool = False,
+    context: SessionContext | None = None,
+    stream: bool = False,
+) -> RLPALoopResult:
+    """
+    Library interface for running RLAPH loop.
+
+    Provides a simple, convenient way to run RLAPH without manually
+    creating an RLAPHLoop instance. This is the recommended way to use
+    RLAPH as a library.
+
+    Args:
+        query: The query/prompt string
+        working_dir: Working directory for the loop (default: cwd)
+        session_id: Optional session ID for frame persistence (default: auto-generated UUID[:8])
+        max_depth: Maximum recursion depth (default: 3)
+        verbose: Enable verbose logging (default: False)
+        context: Optional session context (default: empty SessionContext)
+        stream: Reserved for future streaming support (currently ignored)
+
+    Returns:
+        RLPALoopResult with the answer and execution metadata
+
+    Examples:
+        >>> # Simple usage
+        >>> result = await run_rlaph("Analyze the auth flow")
+        >>> print(result.answer)
+
+        >>> # With custom depth and verbosity
+        >>> result = await run_rlaph("Summarize the codebase", max_depth=5, verbose=True)
+
+        >>> # With custom context
+        >>> ctx = SessionContext(files={"auth.py": "...", "login.py": "..."})
+        >>> result = await run_rlaph("Review auth security", context=ctx)
+
+    Note:
+        The `stream` parameter is reserved for future implementation.
+        When True, streaming will yield chunks in real-time for better UX.
+    """
+    loop = RLAPHLoop(max_depth=max_depth, verbose=verbose)
+    ctx = context or SessionContext()
+    wd = Path(working_dir) if working_dir else Path.cwd()
+
+    # Run the loop and return the result
+    # Note: Future tasks will add proper streaming support when stream=True
+    return await loop.run(query, ctx, wd, session_id)
+
+
+async def run_rlaph_stream(
+    query: str,
+    working_dir: Path | str | None = None,
+    session_id: str | None = None,
+    max_depth: int = 3,
+    verbose: bool = False,
+    context: SessionContext | None = None,
+) -> AsyncIterable[str]:
+    """
+    Streaming variant of run_rlaph that yields chunks in real-time.
+
+    This is a convenience wrapper that runs the RLAPH loop and streams
+    the final answer in chunks. For true streaming during execution,
+    future tasks will add support for yielding LLM responses as they arrive.
+
+    Args:
+        query: The query/prompt string
+        working_dir: Working directory for the loop (default: cwd)
+        session_id: Optional session ID for frame persistence (default: auto-generated UUID[:8])
+        max_depth: Maximum recursion depth (default: 3)
+        verbose: Enable verbose logging (default: False)
+        context: Optional session context (default: empty SessionContext)
+
+    Yields:
+        Chunks of the final answer as they become available
+
+    Examples:
+        >>> async for chunk in run_rlaph_stream("Explain this code"):
+        ...     print(chunk, end="")
+    """
+    loop = RLAPHLoop(max_depth=max_depth, verbose=verbose)
+    ctx = context or SessionContext()
+    wd = Path(working_dir) if working_dir else Path.cwd()
+
+    # Run the loop
+    result = await loop.run(query, ctx, wd, session_id)
+
+    # Yield the answer in chunks for real-time display
+    chunk_size = 100  # Chunk size for streaming output
+    for i in range(0, len(result.answer), chunk_size):
+        yield result.answer[i:i + chunk_size]
+
+
 __all__ = [
     "RLAPHLoop",
     "RLPALoopResult",
     "RLPALoopState",
+    "run_rlaph",
+    "run_rlaph_stream",
 ]
