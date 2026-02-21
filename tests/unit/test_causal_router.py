@@ -1,0 +1,257 @@
+"""Tests for causal_router - CausalFrame command router."""
+
+from unittest.mock import patch
+
+import pytest
+
+from src.skills.causal_router import (
+    parse_flags,
+    generate_help_text,
+    COMMANDS,
+    get_session_id,
+    cmd_status,
+    cmd_tree,
+    cmd_resume,
+    cmd_clear_cache,
+)
+
+
+class TestParseFlags:
+    """Test suite for parse_flags function."""
+
+    def test_parse_empty_string(self):
+        """Parse empty string returns empty positional list."""
+        result = parse_flags("")
+        assert result == {"_positional": []}
+
+    def test_parse_none_returns_empty(self):
+        """Parse None returns empty positional list."""
+        result = parse_flags(None)
+        assert result == {"_positional": []}
+
+    def test_parse_positional_only(self):
+        """Parse string with only positional arguments."""
+        result = parse_flags("analyze src/auth.py")
+        assert result["_positional"] == ["analyze", "src/auth.py"]
+        assert len([k for k in result if k != "_positional"]) == 0
+
+    def test_parse_single_flag_with_value(self):
+        """Parse string with --flag value syntax."""
+        result = parse_flags("analyze src/auth.py --scope security")
+        assert result["_positional"] == ["analyze", "src/auth.py"]
+        assert result["scope"] == "security"
+
+    def test_parse_boolean_flag(self):
+        """Parse string with boolean flag (--flag with no value)."""
+        result = parse_flags("analyze --verbose")
+        assert result["_positional"] == ["analyze"]
+        assert result["verbose"] is True
+
+    def test_parse_multiple_flags(self):
+        """Parse string with multiple flags."""
+        result = parse_flags("analyze src/auth.py --scope security --depth 5 --verbose")
+        assert result["_positional"] == ["analyze", "src/auth.py"]
+        assert result["scope"] == "security"
+        assert result["depth"] == "5"
+        assert result["verbose"] is True
+
+    def test_parse_flag_value_is_another_flag(self):
+        """Parse when next token starts with -- (treat as boolean flag)."""
+        result = parse_flags("analyze --verbose --scope security")
+        assert result["_positional"] == ["analyze"]
+        assert result["verbose"] is True
+        assert result["scope"] == "security"
+
+    def test_parse_quoted_strings(self):
+        """Parse string with quoted arguments using shlex."""
+        result = parse_flags('analyze "some file.py" --scope "security analysis"')
+        assert result["_positional"] == ["analyze", "some file.py"]
+        assert result["scope"] == "security analysis"
+
+    def test_parse_numeric_values_as_strings(self):
+        """Parse numeric flag values as strings."""
+        result = parse_flags("analyze --depth 10 --threshold 3.14")
+        assert result["depth"] == "10"
+        assert result["threshold"] == "3.14"
+
+    def test_parse_mixed_order(self):
+        """Parse flags in various positions relative to positional args."""
+        result = parse_flags("--scope security analyze src/auth.py --verbose")
+        assert result["_positional"] == ["analyze", "src/auth.py"]
+        assert result["scope"] == "security"
+        assert result["verbose"] is True
+
+
+class TestGenerateHelpText:
+    """Test suite for generate_help_text function."""
+
+    def test_help_text_contains_command_table(self):
+        """Help text includes command table with headers."""
+        help_text = generate_help_text()
+        assert "## /causal Commands" in help_text
+        assert "| Command | Description | Example |" in help_text
+        assert "|---------|-------------|----------|" in help_text
+
+    def test_help_text_includes_all_commands(self):
+        """Help text includes entries for all registered commands."""
+        help_text = generate_help_text()
+        for cmd in COMMANDS:
+            assert f"| {cmd} |" in help_text
+
+    def test_help_text_includes_descriptions(self):
+        """Help text includes command descriptions."""
+        help_text = generate_help_text()
+        assert "Run detailed analysis on target" in help_text
+        assert "Quick summary of target" in help_text
+        assert "Debug issues in target" in help_text
+        assert "Show valid/invalidated frames" in help_text
+
+    def test_help_text_includes_examples(self):
+        """Help text includes command examples."""
+        help_text = generate_help_text()
+        assert "/causal analyze" in help_text
+        assert "/causal summarize" in help_text
+        assert "/causal debug" in help_text
+        assert "/causal status" in help_text
+        assert "/causal resume" in help_text
+        assert "/causal tree" in help_text
+        assert "/causal clear-cache" in help_text
+        assert "/causal help" in help_text
+
+    def test_help_text_contains_flags_section(self):
+        """Help text includes flags documentation."""
+        help_text = generate_help_text()
+        assert "### Flags" in help_text
+        assert "| Flag | Effect |" in help_text
+        assert "|------|--------|" in help_text
+
+    def test_help_text_lists_common_flags(self):
+        """Help text documents common flags."""
+        help_text = generate_help_text()
+        assert "--verbose" in help_text
+        assert "--depth" in help_text
+        assert "--scope" in help_text
+        assert "--last" in help_text
+        assert "--session" in help_text
+
+    def test_help_text_describes_flag_effects(self):
+        """Help text describes what each flag does."""
+        help_text = generate_help_text()
+        assert "recursion logs" in help_text or "recursion" in help_text.lower()
+        assert "depth" in help_text.lower()
+        assert "scope" in help_text.lower() or "analysis" in help_text.lower()
+        assert "session" in help_text.lower()
+
+
+class TestCommandsRegistry:
+    """Test suite for COMMANDS registry."""
+
+    def test_all_commands_have_required_fields(self):
+        """All commands in registry have description, example, and agent."""
+        for cmd, info in COMMANDS.items():
+            assert "description" in info
+            assert "example" in info
+            assert "agent" in info
+
+    def test_special_commands_have_none_agent(self):
+        """Special handler commands have agent=None."""
+        special_commands = ["status", "resume", "tree", "clear-cache", "help"]
+        for cmd in special_commands:
+            assert COMMANDS[cmd]["agent"] is None
+
+    def test_agent_commands_have_agent_set(self):
+        """Agent-based commands have agent configured."""
+        agent_commands = ["analyze", "summarize", "debug"]
+        for cmd in agent_commands:
+            assert COMMANDS[cmd]["agent"] is not None
+
+    def test_command_names_are_lowercase(self):
+        """All command names are lowercase for consistency."""
+        for cmd in COMMANDS:
+            assert cmd == cmd.lower()
+
+
+class TestStubHandlers:
+    """Test suite for stub handlers (Tasks 65-68)."""
+
+    @pytest.mark.asyncio
+    async def test_cmd_status_returns_placeholder(self):
+        """cmd_status returns placeholder text."""
+        result = await cmd_status(topic="auth", args={"last": True})
+        assert "Task 65" in result
+        assert "Status dashboard" in result
+
+    @pytest.mark.asyncio
+    async def test_cmd_tree_returns_placeholder(self):
+        """cmd_tree returns placeholder text."""
+        result = await cmd_tree(args={"last": True})
+        assert "Task 66" in result
+        assert "Tree visualization" in result
+
+    @pytest.mark.asyncio
+    async def test_cmd_resume_returns_placeholder(self):
+        """cmd_resume returns placeholder text."""
+        result = await cmd_resume(frame_id="abc123", args={"force": True})
+        assert "Task 67" in result
+        assert "Resume functionality" in result
+
+    @pytest.mark.asyncio
+    async def test_cmd_resume_with_none_frame_id(self):
+        """cmd_resume handles None frame_id."""
+        result = await cmd_resume(frame_id=None, args={})
+        assert "Task 67" in result
+
+    def test_cmd_clear_cache_returns_placeholder(self):
+        """cmd_clear_cache returns placeholder text."""
+        result = cmd_clear_cache()
+        assert "Task 68" in result
+        assert "Clear-cache functionality" in result
+
+
+class TestGetSessionId:
+    """Test suite for get_session_id function."""
+
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    def test_session_flag_takes_priority(self, mock_find_session):
+        """--session flag takes priority over other flags."""
+        mock_find_session.return_value = "recent_session"
+
+        args = {"session": "specific_session", "last": True}
+        result = get_session_id(args)
+
+        assert result == "specific_session"
+        # Should not call find_most_recent_session when --session is provided
+        mock_find_session.assert_not_called()
+
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    def test_last_flag_uses_most_recent(self, mock_find_session):
+        """--last flag uses most recent session."""
+        mock_find_session.return_value = "recent_session"
+
+        args = {"last": True}
+        result = get_session_id(args)
+
+        assert result == "recent_session"
+        mock_find_session.assert_called_once()
+
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    def test_no_session_flags_defaults_to_most_recent(self, mock_find_session):
+        """Without --session or --last, defaults to most recent session."""
+        mock_find_session.return_value = "recent_session"
+
+        args = {"verbose": True}
+        result = get_session_id(args)
+
+        assert result == "recent_session"
+        mock_find_session.assert_called_once()
+
+    @patch("src.skills.causal_router.FrameStore.find_most_recent_session")
+    def test_empty_args_defaults_to_most_recent(self, mock_find_session):
+        """Empty args dict defaults to most recent session."""
+        mock_find_session.return_value = "recent_session"
+
+        args = {}
+        result = get_session_id(args)
+
+        assert result == "recent_session"
+        mock_find_session.assert_called_once()

@@ -109,6 +109,34 @@ class FrameStore:
         frames = self.list()
         return [f for f in frames if f.status == status]
 
+    @staticmethod
+    def find_most_recent_session() -> str | None:
+        """
+        Find the most recent session ID from the frames directory.
+
+        Returns:
+            Most recent session ID if found, None otherwise
+        """
+        frames_dir = Path.home() / ".claude" / "rlm-frames"
+
+        if not frames_dir.exists():
+            return None
+
+        sessions = []
+        for session_dir in frames_dir.iterdir():
+            if session_dir.is_dir():
+                # Check for artifacts.json to validate session
+                artifacts_path = session_dir / "artifacts.json"
+                if artifacts_path.exists():
+                    sessions.append((session_dir.name, artifacts_path.stat().st_mtime))
+
+        if not sessions:
+            return None
+
+        # Sort by modification time, most recent first
+        sessions.sort(key=lambda x: x[1], reverse=True)
+        return sessions[0][0]
+
     def _serialize(self, frame: "CausalFrame") -> dict:
         """Serialize CausalFrame to JSON-compatible dict."""
         data = {
