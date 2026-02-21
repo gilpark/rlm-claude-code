@@ -1,13 +1,14 @@
-"""Simple synchronous LLM client for REPL environment.
+"""Simple LLM client for REPL environment with streaming support.
 
 Design doc reference: src/llm_client.py in target architecture.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, AsyncIterable, TYPE_CHECKING
 
 import anthropic
 
@@ -36,6 +37,7 @@ class LLMClient:
     base_url: str | None = None
     config: "RLMConfig | None" = None
     _client: anthropic.Anthropic | None = field(default=None, repr=False)
+    _async_client: anthropic.AsyncAnthropic | None = field(default=None, repr=False)
 
     def __post_init__(self):
         """Initialize from environment and config."""
@@ -50,15 +52,32 @@ class LLMClient:
             self.config = RLMConfig.load()
 
     def _get_client(self) -> anthropic.Anthropic:
-        """Get or create Anthropic client."""
+        """Get or create Anthropic sync client."""
         if self._client is None:
             if not self.api_key:
                 raise LLMError("ANTHROPIC_API_KEY not set")
             client_kwargs = {"api_key": self.api_key}
             if self.base_url:
                 client_kwargs["base_url"] = self.base_url
+            # Set timeout from env var
+            timeout_ms = os.environ.get("API_TIMEOUT_MS", "300000")
+            client_kwargs["timeout"] = float(timeout_ms) / 1000
             object.__setattr__(self, "_client", anthropic.Anthropic(**client_kwargs))
         return self._client
+
+    def _get_async_client(self) -> anthropic.AsyncAnthropic:
+        """Get or create Anthropic async client."""
+        if self._async_client is None:
+            if not self.api_key:
+                raise LLMError("ANTHROPIC_API_KEY not set")
+            client_kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            # Set timeout from env var
+            timeout_ms = os.environ.get("API_TIMEOUT_MS", "300000")
+            client_kwargs["timeout"] = float(timeout_ms) / 1000
+            object.__setattr__(self, "_async_client", anthropic.AsyncAnthropic(**client_kwargs))
+        return self._async_client
 
     def get_model_for_depth(self, depth: int) -> str:
         """
@@ -130,7 +149,10 @@ class LLMClient:
         temperature: float | None = None,
     ) -> str:
         """
-        Make a synchronous LLM call.
+        Make a synchronous LLM call (backward compatible wrapper).
+
+        This method is always synchronous and returns a string.
+        It uses streaming internally but collects all chunks before returning.
 
         Args:
             query: The query/prompt string
@@ -160,8 +182,112 @@ class LLMClient:
         # Build full prompt with context
         full_prompt = self._build_prompt(query, context)
 
-        # Make the actual API call
+        # Use sync API call directly (no async overhead for simple sync calls)
         return self._api_call(selected_model, full_prompt, max_tokens, system, temp)
+
+    async def call_stream(
+        self,
+        query: str,
+        context: dict[str, Any] | None = None,
+        system: str | None = None,
+        model: str | None = None,
+        depth: int = 0,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> AsyncIterable[str]:
+        """
+        Streaming LLM call for real-time UX.
+
+        Yields text chunks as they arrive from the API.
+
+        Args:
+            query: The query/prompt string
+            context: Optional context dict (files, prior_results, etc.)
+            system: Optional system prompt
+            model: Optional model override (None = use config default for depth)
+            depth: Current recursion depth for model selection
+            max_tokens: Maximum tokens in response
+            temperature: Optional temperature override (None = use config)
+
+        Yields:
+            Text chunks as they arrive from the LLM
+
+        Raises:
+            ValueError: If query is empty
+            LLMError: If the LLM call fails
+        """
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+
+        # Select model
+        selected_model = model if model else self.get_model_for_depth(depth)
+
+        # Use provided temperature or config default
+        temp = temperature if temperature is not None else self.get_temperature()
+
+        # Build full prompt with context
+        full_prompt = self._build_prompt(query, context)
+
+        client = self._get_async_client()
+
+        try:
+            request_params: dict[str, Any] = {
+                "model": selected_model,
+                "max_tokens": max_tokens,
+                "messages": [{"role": "user", "content": full_prompt}],
+                "temperature": temp,
+            }
+
+            if system:
+                request_params["system"] = system
+
+            async with client.messages.stream(**request_params) as stream:
+                async for text in stream.text_stream:
+                    yield text
+
+        except anthropic.APIError as e:
+            raise LLMError(f"Anthropic API error: {e}") from e
+        except Exception as e:
+            raise LLMError(f"LLM call failed: {e}") from e
+
+    async def call_async(
+        self,
+        query: str,
+        context: dict[str, Any] | None = None,
+        system: str | None = None,
+        model: str | None = None,
+        depth: int = 0,
+        max_tokens: int = 4096,
+        temperature: float | None = None,
+    ) -> str:
+        """
+        Async non-streaming LLM call.
+
+        Collects all streaming chunks and returns complete response.
+
+        Args:
+            query: The query/prompt string
+            context: Optional context dict (files, prior_results, etc.)
+            system: Optional system prompt
+            model: Optional model override (None = use config default for depth)
+            depth: Current recursion depth for model selection
+            max_tokens: Maximum tokens in response
+            temperature: Optional temperature override (None = use config)
+
+        Returns:
+            Complete LLM response as string
+
+        Raises:
+            ValueError: If query is empty
+            LLMError: If the LLM call fails
+        """
+        if not query or not query.strip():
+            raise ValueError("Query cannot be empty")
+
+        result = []
+        async for chunk in self.call_stream(query, context, system, model, depth, max_tokens, temperature):
+            result.append(chunk)
+        return "".join(result)
 
     def _build_prompt(self, query: str, context: dict[str, Any] | None) -> str:
         """Build full prompt from query and context."""
