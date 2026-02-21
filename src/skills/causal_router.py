@@ -14,7 +14,10 @@ if TYPE_CHECKING:
 
 
 from src.agents.presets import analyzer_agent, summarizer_agent, debugger_agent, security_agent
+from src.config import CFConfig
 from src.frame.canonical_task import CanonicalTask
+from src.frame.causal_frame import FrameStatus
+from src.frame.frame_index import FrameIndex
 from src.frame.frame_store import FrameStore
 
 
@@ -212,9 +215,9 @@ def generate_help_text() -> str:
     return help_text
 
 
-# Stub handlers for status, resume, tree, clear-cache (will be implemented in Tasks 65-68)
+# Handlers for status, resume, tree, clear-cache (Tasks 65-68)
 async def cmd_status(topic: str | None, args: dict) -> str:
-    """Show causal awareness dashboard. (Task 65)
+    """Show causal awareness dashboard with valid/invalidated frames.
 
     Args:
         topic: Optional topic filter for frames
@@ -223,7 +226,98 @@ async def cmd_status(topic: str | None, args: dict) -> str:
     Returns:
         Status dashboard text
     """
-    return "Status dashboard coming in Task 65..."
+    config = CFConfig.load()
+    limit = config.status_limit
+    use_icons = config.status_icons
+
+    session_id = get_session_id(args)
+    index = FrameIndex.load(session_id)
+
+    if not index or len(index) == 0:
+        return "No frames found. Run `/causal analyze` first."
+
+    frames = list(index.values())
+
+    # Filter by topic if provided
+    if topic and topic != "**/*":
+        frames = [f for f in frames if topic.lower() in f.query.lower()]
+
+    # Group by status
+    completed = [f for f in frames if f.status == FrameStatus.COMPLETED]
+    invalidated = [f for f in frames if f.status == FrameStatus.INVALIDATED]
+    suspended = [f for f in frames if f.status == FrameStatus.SUSPENDED]
+
+    # Icons
+    icon_valid = "✓" if use_icons else "[OK]"
+    icon_invalid = "✗" if use_icons else "[X]"
+    icon_suspended = "⏸" if use_icons else "[...]"
+
+    # Build dashboard
+    output = "## CausalFrame Status\n\n"
+    output += f"**Session:** `{session_id}` (most recent; use --session ID for others)\n\n"
+
+    # Summary section
+    output += "### Summary\n"
+    output += f"- Valid frames: {len(completed)} ({icon_valid})\n"
+    if invalidated:
+        output += f"- Invalidated frames: {len(invalidated)} ({icon_invalid}) — re-run with `/causal resume`\n"
+    else:
+        output += f"- Invalidated frames: 0 ({icon_invalid}) — all knowledge is current\n"
+    if suspended:
+        output += f"- Suspended branches: {len(suspended)} ({icon_suspended}) — ready to resume\n"
+    else:
+        output += f"- Suspended branches: 0 ({icon_suspended}) — none ready to resume\n"
+    output += "\n"
+
+    # Valid frames table
+    if completed:
+        output += "### Valid Frames\n"
+        output += "| Status | Frame | Query | Confidence |\n"
+        output += "|--------|-------|-------|------------|\n"
+
+        for f in completed[:limit]:
+            query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
+            output += f"| {icon_valid} | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
+
+        if len(completed) > limit:
+            output += f"\n... and {len(completed) - limit} more. Use `--full` to see all.\n"
+        output += "\n"
+
+    # Invalidated frames table
+    if invalidated:
+        output += "### Invalidated Frames\n"
+        output += "| Status | Frame | Reason | Confidence |\n"
+        output += "|--------|-------|--------|------------|\n"
+
+        for f in invalidated[:limit]:
+            query_short = f.query[:30] + "..." if len(f.query) > 30 else f.query
+            reason = f.invalidation_condition.get("description", "Unknown") if f.invalidation_condition else "Unknown"
+            reason_short = reason[:30] + "..." if len(reason) > 30 else reason
+            output += f"| {icon_invalid} | `{f.frame_id[:8]}` | {reason_short} | {f.confidence:.1f} |\n"
+
+        if len(invalidated) > limit:
+            output += f"\n... and {len(invalidated) - limit} more.\n"
+        output += "\n"
+
+    # Suspended frames table
+    if suspended:
+        output += "### Suspended Branches\n"
+        output += "| Status | Frame | Query | Confidence |\n"
+        output += "|--------|-------|-------|------------|\n"
+
+        for f in suspended[:limit]:
+            query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
+            output += f"| {icon_suspended} | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
+        output += "\n"
+
+    # Suggestions section
+    output += "**Suggestions:**\n"
+    if invalidated:
+        first_invalidated = invalidated[0].frame_id[:8]
+        output += f"- Invalidated? Try `/causal resume {first_invalidated}`\n"
+    output += "- More details: `/causal status --full` or `/causal tree`\n"
+
+    return output
 
 
 async def cmd_tree(args: dict) -> str:

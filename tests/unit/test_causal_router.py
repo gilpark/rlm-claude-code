@@ -175,13 +175,6 @@ class TestStubHandlers:
     """Test suite for stub handlers (Tasks 65-68)."""
 
     @pytest.mark.asyncio
-    async def test_cmd_status_returns_placeholder(self):
-        """cmd_status returns placeholder text."""
-        result = await cmd_status(topic="auth", args={"last": True})
-        assert "Task 65" in result
-        assert "Status dashboard" in result
-
-    @pytest.mark.asyncio
     async def test_cmd_tree_returns_placeholder(self):
         """cmd_tree returns placeholder text."""
         result = await cmd_tree(args={"last": True})
@@ -206,6 +199,505 @@ class TestStubHandlers:
         result = cmd_clear_cache()
         assert "Task 68" in result
         assert "Clear-cache functionality" in result
+
+
+class TestCmdStatus:
+    """Test suite for cmd_status handler (Task 65)."""
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_no_frames(self, mock_config_load, mock_index_load):
+        """cmd_status returns message when no frames found."""
+        from src.frame.frame_index import FrameIndex
+
+        # Setup mocks
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        mock_index_load.return_value = FrameIndex()  # Empty index
+
+        result = await cmd_status(topic=None, args={})
+
+        assert "No frames found" in result
+        assert "/causal analyze" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_with_completed_frames(self, mock_config_load, mock_index_load):
+        """cmd_status shows completed frames table."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config mock
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create test frames
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame1 = CausalFrame(
+            frame_id="abc123def456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Analyze authentication flow",
+            context_slice=context,
+            evidence=[],
+            conclusion="Auth flow is secure",
+            confidence=0.95,
+            invalidation_condition={"description": "File changes"},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        frame2 = CausalFrame(
+            frame_id="def789ghi012",
+            depth=1,
+            parent_id="abc123def456",
+            children=[],
+            query="Check session management",
+            context_slice=context,
+            evidence=[],
+            conclusion="Sessions timeout correctly",
+            confidence=0.88,
+            invalidation_condition={"description": "Config changes"},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame1)
+        index.add(frame2)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        # Check dashboard structure
+        assert "## CausalFrame Status" in result
+        assert "### Summary" in result
+        assert "Valid frames: 2" in result
+        assert "### Valid Frames" in result
+        assert "abc123de" in result  # Truncated frame_id
+        assert "0.9" in result or "0.8" in result  # Confidence values
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_with_invalidated_frames(self, mock_config_load, mock_index_load):
+        """cmd_status shows invalidated frames with reasons."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config mock
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create invalidated frame
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="bad111bad222",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Analyze deprecated API",
+            context_slice=context,
+            evidence=[],
+            conclusion="API is deprecated",
+            confidence=0.70,
+            invalidation_condition={"description": "src/api.py was modified"},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        assert "Invalidated frames: 1" in result
+        assert "### Invalidated Frames" in result
+        assert "src/api.py was modified" in result
+        assert "/causal resume" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_with_suspended_frames(self, mock_config_load, mock_index_load):
+        """cmd_status shows suspended branches."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config mock
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create suspended frame
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="sus333sus444",
+            depth=1,
+            parent_id="parent123",
+            children=[],
+            query="Deep investigation of bug",
+            context_slice=context,
+            evidence=[],
+            conclusion=None,
+            confidence=0.0,
+            invalidation_condition={},
+            status=FrameStatus.SUSPENDED,
+            created_at=datetime.now(),
+            branched_from="parent123",
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        assert "Suspended branches: 1" in result
+        assert "### Suspended Branches" in result
+        assert "sus333su" in result  # Truncated frame_id
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_respects_limit(self, mock_config_load, mock_index_load):
+        """cmd_status limits number of frames shown per status."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config with limit=2
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 2
+        mock_config.status_icons = True
+
+        # Create 5 completed frames
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        index = FrameIndex()
+        for i in range(5):
+            frame = CausalFrame(
+                frame_id=f"frame{i:04d}" + "x" * 12,
+                depth=0,
+                parent_id=None,
+                children=[],
+                query=f"Query {i}",
+                context_slice=context,
+                evidence=[],
+                conclusion=f"Conclusion {i}",
+                confidence=0.8 + i * 0.02,
+                invalidation_condition={},
+                status=FrameStatus.COMPLETED,
+                created_at=datetime.now(),
+            )
+            index.add(frame)
+
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        # Should show "2 more" message
+        assert "and 3 more" in result or "and 3" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_icons_disabled(self, mock_config_load, mock_index_load):
+        """cmd_status uses text icons when disabled in config."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config with icons disabled
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = False
+
+        # Create test frame
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="test123test456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Test query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Test conclusion",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        # Should use text icons
+        assert "[OK]" in result
+        assert "✓" not in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_filters_by_topic(self, mock_config_load, mock_index_load):
+        """cmd_status filters frames by topic when provided."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create frames with different topics
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame1 = CausalFrame(
+            frame_id="auth123auth456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Analyze authentication module",
+            context_slice=context,
+            evidence=[],
+            conclusion="Auth is secure",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        frame2 = CausalFrame(
+            frame_id="db123db456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Check database schema",
+            context_slice=context,
+            evidence=[],
+            conclusion="Schema is valid",
+            confidence=0.85,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame1)
+        index.add(frame2)
+        mock_index_load.return_value = index
+
+        # Filter by "auth"
+        result = await cmd_status(topic="auth", args={})
+
+        # Should only show auth frame
+        assert "Valid frames: 1" in result
+        assert "authentication" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_wildcard_topic(self, mock_config_load, mock_index_load):
+        """cmd_status shows all frames when topic is **/*."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create test frames
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        index = FrameIndex()
+        for i in range(3):
+            frame = CausalFrame(
+                frame_id=f"frame{i:04d}" + "x" * 12,
+                depth=0,
+                parent_id=None,
+                children=[],
+                query=f"Query {i}",
+                context_slice=context,
+                evidence=[],
+                conclusion=f"Conclusion {i}",
+                confidence=0.8,
+                invalidation_condition={},
+                status=FrameStatus.COMPLETED,
+                created_at=datetime.now(),
+            )
+            index.add(frame)
+
+        mock_index_load.return_value = index
+
+        # Use wildcard topic
+        result = await cmd_status(topic="**/*", args={})
+
+        # Should show all frames
+        assert "Valid frames: 3" in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_truncates_long_queries(self, mock_config_load, mock_index_load):
+        """cmd_status truncates long query text in tables."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create frame with long query
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        long_query = "This is a very long query that should be truncated " * 3
+
+        frame = CausalFrame(
+            frame_id="long123long456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query=long_query,
+            context_slice=context,
+            evidence=[],
+            conclusion="Conclusion",
+            confidence=0.9,
+            invalidation_condition={},
+            status=FrameStatus.COMPLETED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        # Query should be truncated with "..."
+        assert "..." in result
+        # But not the full query
+        assert long_query not in result
+
+    @patch("src.skills.causal_router.FrameIndex.load")
+    @patch("src.skills.causal_router.CFConfig.load")
+    @pytest.mark.asyncio
+    async def test_cmd_status_suggestions_section(self, mock_config_load, mock_index_load):
+        """cmd_status includes suggestions section."""
+        from datetime import datetime
+        from src.frame.causal_frame import CausalFrame, FrameStatus
+        from src.frame.context_slice import ContextSlice
+        from src.frame.frame_index import FrameIndex
+
+        # Setup config
+        mock_config = mock_config_load.return_value
+        mock_config.status_limit = 5
+        mock_config.status_icons = True
+
+        # Create invalidated frame
+        context = ContextSlice(
+            files={},
+            memory_refs=[],
+            tool_outputs={},
+            token_budget=1000,
+        )
+
+        frame = CausalFrame(
+            frame_id="inv123inv456",
+            depth=0,
+            parent_id=None,
+            children=[],
+            query="Invalidated query",
+            context_slice=context,
+            evidence=[],
+            conclusion="Old conclusion",
+            confidence=0.7,
+            invalidation_condition={"description": "File changed"},
+            status=FrameStatus.INVALIDATED,
+            created_at=datetime.now(),
+        )
+
+        index = FrameIndex()
+        index.add(frame)
+        mock_index_load.return_value = index
+
+        result = await cmd_status(topic=None, args={})
+
+        assert "**Suggestions:**" in result
+        assert "/causal resume inv123in" in result
+        assert "--full" in result
+        assert "/causal tree" in result
 
 
 class TestGetSessionId:
