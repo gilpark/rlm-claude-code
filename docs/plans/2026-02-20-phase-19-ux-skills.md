@@ -1,20 +1,21 @@
 # Phase 19: UX & Skills Standardization
 
-**Status:** Draft for Review (v2 - incorporates feedback)
+**Status:** Draft for Review (v3 - SDK streaming + clarified sub-agent scope)
 **Priority:** MEDIUM
-**Dependencies:** Phase 18 (Tree + Evidence + Recursion) ✓, Phase 18.5 (Structured Output)
+**Dependencies:** Phase 18 (Tree + Evidence + Recursion) ✓, Phase 18.5 (Structured Output) ✓
 
 ---
 
 ## Goal
 
-Make CausalFrame feel like a real plugin with discoverable slash commands and clean library interface.
+Make CausalFrame feel like a real plugin with discoverable slash commands, SDK streaming, and clean library interface.
 
 **Key outcomes:**
 1. `/causal` prefix for all commands (discoverable, with `/rlm` alias)
-2. Skills use `RLMSubAgent` pattern (reusable personas, no subprocess)
-3. Transparency via `--verbose` / `--depth` / `--last` flags
-4. SessionStart surfaces invalidated frames + proactive resume suggestion
+2. **SDK streaming** for real-time UX (no more spinner → typing effect)
+3. Skills use `RLMSubAgent` pattern for **top-level workflows only**
+4. Transparency via `--verbose` / `--depth` / `--last` flags
+5. SessionStart surfaces invalidated frames + proactive resume suggestion
 
 ---
 
@@ -36,18 +37,25 @@ Single router file, discoverable via `/causal` prefix (with `/rlm` alias).
 
 **Aliases:** `/causal` = `/rlm` = `/cf` (user preference)
 
-### 2. RLMSubAgent Pattern
+### 2. RLMSubAgent Pattern (Top-Level Workflows Only)
 
-Instead of raw `run_rlaph()` calls, introduce `RLMSubAgent` — a reusable wrapper with persona/prompt overrides.
+`RLMSubAgent` wraps **top-level RLM runs** — not every internal LLM call.
+
+**Scope:**
+| Call Type | Pattern | Why |
+|-----------|---------|-----|
+| `/causal analyze` → skill → RLMSubAgent.run() | **Sub-Agent** | Persona override, specialized config |
+| Internal `llm(sub_query)` in REPL | **Direct LLM client** | Already managed by RLAPHLoop (depth, frames) |
+| Frame creation, evidence tracking | **Direct** | Core loop responsibility |
 
 **Benefits:**
-- Specialized agents (analyzer, summarizer, debugger)
+- Specialized agents (analyzer, summarizer, debugger) for user commands
 - No subprocess overhead
-- Shared memory (ContextMap)
+- Internal recursion stays fast (no extra layer)
 - Composable & maintainable
 
 ```python
-# Skills call specialized agents, not raw loop
+# Skills call specialized agents for top-level commands
 analyzer_agent = RLMSubAgent(
     RLMSubAgentConfig(
         name="analyzer",
@@ -57,9 +65,45 @@ analyzer_agent = RLMSubAgent(
 )
 
 result = await analyzer_agent.run(query="Analyze auth.py")
+
+# Internal llm() calls in REPL stay direct — managed by RLAPHLoop
+# No sub-agent wrapping needed for recursion
 ```
 
-### 3. Flag Parsing (Simple & Reliable)
+### 3. SDK Streaming (Real-Time UX)
+
+Replace HTTP-based `llm_client.py` with **Anthropic SDK** for streaming.
+
+**Benefits:**
+- Real-time typing effect (no spinner)
+- Better UX for long-running queries
+- Applies uniformly to all LLM calls (top-level + internal)
+
+```python
+from anthropic import AsyncAnthropic
+
+class LLMClient:
+    def __init__(self):
+        self.client = AsyncAnthropic(
+            api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
+            base_url=os.getenv("ANTHROPIC_BASE_URL"),
+        )
+
+    async def call_stream(self, query: str, system: str = "") -> AsyncIterable[str]:
+        """Streaming LLM call for real-time UX."""
+        async with self.client.messages.stream(
+            model=os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514"),
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": query}],
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+```
+
+**Note:** Streaming applies to all calls uniformly. Sub-agent pattern is orthogonal — it's a config wrapper, not changing how LLM is called.
+
+### 4. Flag Parsing (Simple & Reliable)
 
 Use `shlex` + manual parsing (zero deps, reliable):
 
@@ -137,7 +181,91 @@ if verbose:
 
 ## Implementation Tasks
 
-### Task 1: `run_rlaph()` Library Function
+### Task 1: SDK Streaming Refactor
+
+**File:** `src/repl/llm_client.py` (refactor)
+
+Replace HTTP-based client with Anthropic SDK for streaming:
+
+```python
+from anthropic import AsyncAnthropic
+import os
+from typing import AsyncIterable
+
+class LLMClient:
+    def __init__(self):
+        self.client = AsyncAnthropic(
+            api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
+            base_url=os.getenv("ANTHROPIC_BASE_URL"),
+            timeout=int(os.getenv("API_TIMEOUT_MS", 300000)) / 1000,
+        )
+
+    async def call_stream(
+        self,
+        query: str,
+        system: str = "",
+        model: str | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterable[str]:
+        """Streaming LLM call for real-time UX."""
+        model = model or os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-20250514")
+
+        async with self.client.messages.stream(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": query}],
+        ) as stream:
+            async for text in stream.text_stream:
+                yield text
+
+    def call(
+        self,
+        query: str,
+        context: dict | None = None,
+        system: str = "",
+        model: str | None = None,
+        max_tokens: int = 4096,
+        depth: int = 0,
+    ) -> str:
+        """Sync wrapper for legacy calls (non-streaming)."""
+        import asyncio
+
+        async def _collect():
+            result = []
+            async for chunk in self.call_stream(query, system, model, max_tokens):
+                result.append(chunk)
+            return "".join(result)
+
+        # Check if we're already in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context — use create_task or return coroutine
+            return _collect()
+        except RuntimeError:
+            # No running loop — safe to use asyncio.run
+            return asyncio.run(_collect())
+
+    async def call_async(
+        self,
+        query: str,
+        system: str = "",
+        model: str | None = None,
+        max_tokens: int = 4096,
+    ) -> str:
+        """Async non-streaming call."""
+        result = []
+        async for chunk in self.call_stream(query, system, model, max_tokens):
+            result.append(chunk)
+        return "".join(result)
+```
+
+**Benefits:**
+- Real-time typing effect for better UX
+- Uniform interface for all LLM calls
+- Backward compatible with existing `call()` method
+
+### Task 2: `run_rlaph()` Library Function
 
 **File:** `src/repl/rlaph_loop.py`
 
@@ -149,15 +277,25 @@ async def run_rlaph(
     max_depth: int = 3,
     verbose: bool = False,
     context: SessionContext | None = None,
-) -> RLPALoopResult:
-    """Library interface for running RLAPH loop."""
+    stream: bool = False,
+) -> RLPALoopResult | AsyncIterable[str]:
+    """
+    Library interface for running RLAPH loop.
+
+    Args:
+        stream: If True, yield chunks as they arrive (for real-time UX)
+
+    Returns:
+        RLPALoopResult if stream=False
+        AsyncIterable[str] if stream=True
+    """
     loop = RLAPHLoop(max_depth=max_depth, verbose=verbose)
     ctx = context or SessionContext()
     wd = Path(working_dir) if working_dir else Path.cwd()
     return await loop.run(query, ctx, wd, session_id)
 ```
 
-### Task 2: `RLMSubAgent` Class
+### Task 3: `RLMSubAgent` Class
 
 **File:** `src/agents/sub_agent.py` (NEW)
 
@@ -227,7 +365,7 @@ class RLMSubAgent:
         return result
 ```
 
-### Task 3: Pre-defined Sub-Agents
+### Task 4: Pre-defined Sub-Agents
 
 **File:** `src/agents/presets.py` (NEW)
 
@@ -272,7 +410,7 @@ security_agent = RLMSubAgent(
 )
 ```
 
-### Task 4: `/causal` Router Skill
+### Task 5: `/causal` Router Skill
 
 **File:** `skills/causal.md` (or update existing `causeway:causal`)
 
@@ -441,7 +579,7 @@ def generate_help_text() -> str:
     return help_text
 ```
 
-### Task 5: `/causal status` Handler
+### Task 6: `/causal status` Handler
 
 ```python
 async def cmd_status(topic: str | None, args: dict) -> str:
@@ -487,7 +625,7 @@ async def cmd_status(topic: str | None, args: dict) -> str:
     return output
 ```
 
-### Task 6: `/causal tree` Handler
+### Task 7: `/causal tree` Handler
 
 ```python
 async def cmd_tree(args: dict) -> str:
@@ -525,7 +663,7 @@ async def cmd_tree(args: dict) -> str:
     return output
 ```
 
-### Task 7: `/causal resume` Handler
+### Task 8: `/causal resume` Handler
 
 ```python
 async def cmd_resume(frame_id: str | None, args: dict) -> str:
@@ -563,7 +701,7 @@ async def cmd_resume(frame_id: str | None, args: dict) -> str:
     return f"## Resumed Frame `{frame_id[:8]}`\n\n{result.answer}"
 ```
 
-### Task 8: `/causal clear-cache` Handler
+### Task 9: `/causal clear-cache` Handler
 
 ```python
 def cmd_clear_cache() -> str:
@@ -576,7 +714,7 @@ def cmd_clear_cache() -> str:
     return "✓ ContextMap cache cleared. Next run will re-scan files."
 ```
 
-### Task 9: SessionStart Enhancement
+### Task 10: SessionStart Enhancement
 
 **File:** `hooks/session_start.py`
 
@@ -608,7 +746,7 @@ def session_start_hook(context):
         print("\n**Suggestion:** Use `/causal resume` to re-run invalidated frames.\n")
 ```
 
-### Task 10: Verbose Mode Expansion
+### Task 11: Verbose Mode Expansion
 
 **File:** `src/repl/rlaph_loop.py`
 
@@ -631,7 +769,8 @@ if self._verbose:
 
 | File | Change | Lines |
 |------|--------|-------|
-| `src/repl/rlaph_loop.py` | Add `run_rlaph()` + verbose expansion | +20 |
+| `src/repl/llm_client.py` | Refactor to SDK + streaming | +40 |
+| `src/repl/rlaph_loop.py` | Add `run_rlaph()` + stream support + verbose | +30 |
 | `src/agents/sub_agent.py` | NEW: RLMSubAgent class | +50 |
 | `src/agents/presets.py` | NEW: Pre-configured agents | +40 |
 | `src/agents/__init__.py` | NEW: Package init | +5 |
@@ -640,7 +779,7 @@ if self._verbose:
 | `hooks/session_start.py` | Enhancement | +20 |
 | `src/frame/frame_store.py` | Add `find_most_recent_session()` | +10 |
 
-**Total:** ~305 lines of new code
+**Total:** ~355 lines of new/changed code
 
 ---
 
