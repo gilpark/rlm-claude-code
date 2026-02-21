@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore", category=SyntaxWarning, module="RestrictedPyth
 
 from ..config import RLMConfig, default_config
 from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id, generate_invalidation_condition
+from ..frame.intent_extractor import extract_canonical_task
 from ..frame.context_map import ContextMap
 from ..frame.context_slice import ContextSlice
 from ..frame.frame_index import FrameIndex
@@ -288,6 +289,7 @@ class RLAPHLoop:
                         confidence=0.8,  # Default, can be updated
                         invalidation_condition=generate_invalidation_condition(context_slice),
                         status=FrameStatus.COMPLETED if exec_result.success else FrameStatus.INVALIDATED,
+                        canonical_task=extract_canonical_task(code[:200], self.llm_client, use_llm_fallback=False),
                         branched_from=None,
                         escalation_reason=exec_result.error if not exec_result.success else None,
                         created_at=datetime.now(),
@@ -318,7 +320,7 @@ class RLAPHLoop:
                     state.messages.append(
                         {
                             "role": "user",
-                            "content": f"[SYSTEM - Code execution result]:\n```\n{truncated_result}\n```\n\nNow provide your FINAL: <answer> based on these results.",
+                            "content": f"[SYSTEM - Code execution result]:\n```\n{truncated_result}\n```\n\nYou MUST now provide your FINAL: <answer> based on these results. Do NOT continue without writing the FINAL: line.",
                         }
                     )
 
@@ -388,7 +390,7 @@ class RLAPHLoop:
         Args:
             query: Query string
             context: Optional context string
-            depth: Explicit depth for this call (None = current_depth + 1)
+            depth: Explicit depth for this call (None = parent_depth + 1)
 
         Returns:
             LLM response as string
@@ -396,8 +398,14 @@ class RLAPHLoop:
         Raises:
             RecursionDepthError: If max depth exceeded
         """
-        # Calculate depth explicitly (don't mutate self._depth)
-        current_depth = depth if depth is not None else self._depth + 1
+        # Calculate depth from parent frame (not self._depth)
+        if depth is not None:
+            current_depth = depth
+        elif self._current_frame_id:
+            parent_frame = self.frame_index.get(self._current_frame_id)
+            current_depth = (parent_frame.depth + 1) if parent_frame else 1
+        else:
+            current_depth = 1  # First child of root
 
         # Check depth limit
         if current_depth > self.max_depth:
@@ -438,6 +446,7 @@ class RLAPHLoop:
             confidence=0.8,  # Default, can be updated
             invalidation_condition=generate_invalidation_condition(context_slice),
             status=FrameStatus.COMPLETED,
+            canonical_task=extract_canonical_task(query, self.llm_client, use_llm_fallback=False),
             branched_from=None,
             escalation_reason=None,
             created_at=datetime.now(),
@@ -478,7 +487,12 @@ Your workflow:
 2. STOP - the system will execute and return [SYSTEM - Code execution result]
 3. Read the REAL output from the system
 4. For complex tasks, use llm(sub_query) to decompose
-5. Write more code OR provide FINAL: <answer>
+5. ALWAYS end with FINAL: <answer> when done
+
+MANDATORY: After all sub-tasks complete, you MUST synthesize and write:
+FINAL: <complete answer combining all results>
+
+Do NOT leave the answer incomplete. Do NOT end without the FINAL: line.
 
 Pre-loaded Libraries (NO import needed):
 - hashlib: Use directly as `hashlib.sha256(data.encode()).hexdigest()`
