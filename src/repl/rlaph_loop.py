@@ -35,6 +35,7 @@ from ..types import RecursionDepthError, SessionContext
 from .llm_client import LLMClient
 from .repl_environment import RLMEnvironment
 from .response_parser import ResponseAction, ResponseParser
+from .json_parser import parse_llm_response, StructuredResponse
 
 if TYPE_CHECKING:
     pass  # No external type imports needed for v2
@@ -273,6 +274,9 @@ class RLAPHLoop:
                         token_budget=self.config.cost_controls.max_tokens_per_recursive_call,
                     )
 
+                    # Parse LLM response for structured conclusion and confidence
+                    parsed = parse_llm_response(response_content)
+
                     frame = CausalFrame(
                         frame_id=compute_frame_id(
                             self._current_frame_id,
@@ -285,8 +289,8 @@ class RLAPHLoop:
                         query=code[:200],
                         context_slice=context_slice,
                         evidence=self._collect_evidence(),
-                        conclusion=str(exec_result.output)[:500] if exec_result.success else None,
-                        confidence=0.8,  # Default, can be updated
+                        conclusion=parsed.conclusion[:500] if parsed.conclusion else str(exec_result.output)[:500],
+                        confidence=parsed.confidence,
                         invalidation_condition=generate_invalidation_condition(context_slice),
                         status=FrameStatus.COMPLETED if exec_result.success else FrameStatus.INVALIDATED,
                         canonical_task=extract_canonical_task(code[:200], self.llm_client, use_llm_fallback=False),
@@ -308,6 +312,25 @@ class RLAPHLoop:
                     self.repl.memory_refs.clear()
                     # === END FRAME CREATION ===
 
+                    # === HANDLE SUB_TASKS FOR EXPLICIT RECURSION (Phase 18.5 Task 5) ===
+                    if parsed.should_continue and self._depth < self.max_depth:
+                        # Execute sub-tasks in order of priority
+                        sorted_tasks = sorted(parsed.sub_tasks, key=lambda t: t.get("priority", 999))
+
+                        for task in sorted_tasks:
+                            sub_query = task.get("query")
+                            if sub_query:
+                                if self._verbose:
+                                    print(f"[RLM] Auto-recursing to sub-task: {sub_query[:60]}...")
+                                sub_result = self.llm_sync(sub_query)
+                                # Sub-result is tracked as child frame automatically
+
+                    elif parsed.should_ask_user:
+                        # Agent needs clarification - log it
+                        if self._verbose:
+                            print(f"[RLM] Agent requesting user input: {parsed.reasoning[:100]}...")
+                    # === END SUB_TASKS HANDLING ===
+
                     # Truncate REPL output
                     MAX_REPL_OUTPUT = 1500
                     repl_result_str = str(repl_result) if repl_result else ""
@@ -320,7 +343,7 @@ class RLAPHLoop:
                     state.messages.append(
                         {
                             "role": "user",
-                            "content": f"[SYSTEM - Code execution result]:\n```\n{truncated_result}\n```\n\nYou MUST now provide your FINAL: <answer> based on these results. Do NOT continue without writing the FINAL: line.",
+                            "content": f"[SYSTEM - Code execution result]:\n```\n{truncated_result}\n```\n\nYou MUST now provide your JSON response with \"next_action\" based on these results. Use \"finalize\" if you have the complete answer, or \"continue\" if more work is needed.",
                         }
                     )
 
@@ -422,6 +445,9 @@ class RLAPHLoop:
             depth=current_depth,
         )
 
+        # Parse the response to extract structured data
+        parsed = parse_llm_response(result)
+
         # Create child frame for this llm call
         context_slice = ContextSlice(
             files={},  # No files read at llm call level
@@ -442,8 +468,8 @@ class RLAPHLoop:
             query=query[:200],
             context_slice=context_slice,
             evidence=self._collect_evidence(),
-            conclusion=result[:500] if result else None,
-            confidence=0.8,  # Default, can be updated
+            conclusion=parsed.conclusion[:500] if parsed.conclusion else (result[:500] if result else None),
+            confidence=parsed.confidence,
             invalidation_condition=generate_invalidation_condition(context_slice),
             status=FrameStatus.COMPLETED,
             canonical_task=extract_canonical_task(query, self.llm_client, use_llm_fallback=False),
@@ -461,13 +487,39 @@ class RLAPHLoop:
         """Build system prompt with REPL instructions and recursion guidance."""
         return f"""You are an RLM (Recursive Language Model) agent with access to a REAL Python REPL.
 
+CRITICAL OUTPUT FORMAT:
+You MUST respond in valid JSON only. No other text before or after.
+The response must be raw JSON only, starting with {{ and ending with }}.
+Do NOT wrap in ```json code blocks.
+
+Use this exact schema:
+
+{{
+  "reasoning": "Your step-by-step thinking here",
+  "conclusion": "Final answer or summary",
+  "confidence": 0.0 to 1.0,
+  "files": ["relevant/file.py", ...] or [],
+  "sub_tasks": [{{"query": "sub query", "priority": 1}}] or [],
+  "needs_more_info": true or false,
+  "next_action": "continue" or "finalize" or "ask_user"
+}}
+
+"next_action": Must be one of:
+- "continue" (more sub-tasks needed)
+- "finalize" (ready for final answer)
+- "ask_user" (need clarification)
+
+If you cannot follow this format, output: {{"error": "invalid format", "conclusion": "your answer"}}
+
 CRITICAL RULES:
-1. When you write code in ```python blocks, the system EXECUTES it and returns REAL output
-2. DO NOT generate fake "REPL output" or "Human:" messages yourself
-3. DO NOT pretend to see execution results - wait for the actual system response
-4. After writing code, STOP and wait for the [SYSTEM - Code execution result]
-5. When you have the final answer, write: FINAL: <answer>
-6. NEVER use import statements - they are blocked. Pre-loaded: hashlib, json, re, os, sys
+1. ALWAYS respond in valid JSON format with the required schema - no other text before or after
+2. Do NOT wrap JSON in ```json code blocks - output raw JSON only
+3. When you write code in ```python blocks, the system EXECUTES it and returns REAL output
+4. DO NOT generate fake "REPL output" or "Human:" messages yourself
+5. DO NOT pretend to see execution results - wait for the actual system response
+6. After writing code, STOP and wait for the [SYSTEM - Code execution result]
+7. When you have the final answer, output JSON with "next_action": "finalize"
+8. NEVER use import statements - they are blocked. Pre-loaded: hashlib, json, re, os, sys
 
 RECURSION - DECOMPOSE COMPLEX TASKS:
 You can call llm(sub_query) to delegate sub-tasks. This creates a CHILD FRAME.
@@ -487,12 +539,17 @@ Your workflow:
 2. STOP - the system will execute and return [SYSTEM - Code execution result]
 3. Read the REAL output from the system
 4. For complex tasks, use llm(sub_query) to decompose
-5. ALWAYS end with FINAL: <answer> when done
+5. ALWAYS end with JSON output including "next_action": "finalize" when done
 
-MANDATORY: After all sub-tasks complete, you MUST synthesize and write:
-FINAL: <complete answer combining all results>
+MANDATORY: After all sub-tasks complete, you MUST synthesize and output JSON:
+{{
+  "reasoning": "Your synthesis reasoning",
+  "conclusion": "<complete answer combining all results>",
+  "confidence": 0.9,
+  "next_action": "finalize"
+}}
 
-Do NOT leave the answer incomplete. Do NOT end without the FINAL: line.
+Do NOT leave the answer incomplete. Do NOT end without proper JSON output.
 
 Pre-loaded Libraries (NO import needed):
 - hashlib: Use directly as `hashlib.sha256(data.encode()).hexdigest()`
@@ -536,7 +593,12 @@ print(f"OAuth: {{oauth_summary[:100]}}...")
 System returns results from child frames
 
 Your response:
-FINAL: The auth module consists of login.py (main flow) and oauth.py (OAuth 2.0)...
+{{
+  "reasoning": "Combined analysis of auth files shows login.py handles main auth, oauth.py implements OAuth 2.0",
+  "conclusion": "The auth module consists of login.py (main flow) and oauth.py (OAuth 2.0)...",
+  "confidence": 0.9,
+  "next_action": "finalize"
+}}
 
 Other functions: peek(), search(), summarize(), llm_batch(), map_reduce()
 Working memory: working_memory dict for storing results across code blocks"""
