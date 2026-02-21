@@ -1,10 +1,10 @@
 # RLM-Claude-Code: Design Document
 
-*February 2026 — v2.2*
+*February 2026 — v2.3*
 
 ---
 
-## Current Reality vs. Vision (Feb 20, 2026)
+## Current Reality vs. Vision (Feb 20, 2026 — post-Phase 18)
 
 The core data model (CausalFrame + tree + invalidation) and spatial externalization (ContextMap + REPL) are implemented and working.
 
@@ -131,7 +131,7 @@ The hooks are the coupling point: `PostToolUse` captures what the REPL saw into 
 
 ### RLAPH Loop — Immediate Execution with Recursion
 
-**Status: Fully implemented with synchronous recursion.** The `llm(sub_query)` call now creates child frames and returns results synchronously.
+**Status: Fully implemented with synchronous recursion.** The `llm(sub_query)` call now creates child frames with explicit depth and returns results immediately.
 
 ```python
 result_1 = llm(query_1)            # executes now, child frame created
@@ -146,11 +146,23 @@ Recursion is explicit and guarded:
 
 ### LLM Client — Provider Agnostic
 
-`llm_client.py` is kept as a swappable provider layer.
+`llm_client.py` is kept as a swappable provider layer. The LM in REPL calls `llm()`, not the API directly:
+
+```python
+class LLMClient:
+    def call(
+        self,
+        query: str,
+        context: dict,
+        model: str | None = None   # None = use default for this depth
+    ) -> str: ...
+```
+
+Provider swap happens in one place. Default model cascade: root uses larger model, sub-calls use smaller. LM can override per-call if needed.
 
 ### REPL Functions
 
-**Status: Implemented.** `llm()` now supports synchronous recursion.
+**Status: Implemented.** `llm()` now supports synchronous recursion, creating child frames automatically.
 
 ```python
 llm(query)                               # immediate nested LLM call (depth+1)
@@ -163,7 +175,7 @@ The LM never sees frames directly — it just calls `llm()` and gets a result. F
 
 ## Part 2: Causal Layer
 
-### Intent Normalization (New)
+### Intent Normalization
 
 **Status: Implemented.** Raw query is not used for frame identity — prevents duplication from wording differences.
 
@@ -176,7 +188,7 @@ CanonicalTask(
 )
 ```
 
-Frame identity = hash(canonical_task + context_slice.hash())
+Frame identity = hash(canonical_task + context_slice.hash)
 
 Extraction: hybrid (rule-based fast path + LLM fallback)
 
@@ -215,7 +227,7 @@ class CausalFrame:
 
 ### Invalidation
 
-**Status: Partially implemented.** Downward cascade (children) works. Sideways cascade via evidence uses `find_dependent_frames` (with caching).
+**Status: Fully implemented.** Downward cascade (children) works. Sideways cascade via evidence uses `find_dependent_frames` (with caching).
 
 Structured condition enables future automation.
 
@@ -227,18 +239,18 @@ Structured condition enables future automation.
 
 **Status: Implemented.** `initial_query` tracked for session continuity.
 
-### Current Implementation Status (Feb 20, 2026)
+### Current Implementation Status (Feb 20, 2026 — post-Phase 18)
 
 | Feature                        | Implemented? | Notes / Next |
 |--------------------------------|--------------|--------------|
-| Synchronous llm() recursion    | Yes          | llm(sub_query) creates child frames; depth tracking works |
+| Synchronous llm() recursion    | Yes          | llm(sub_query) creates child frames; explicit depth param |
 | Tree structure (children)      | Yes          | Populated in FrameIndex.add() |
 | Evidence linking               | Yes          | Only COMPLETED children added to parent.evidence |
-| Intent normalization           | Yes          | canonical_task + hash-based identity |
-| Structured invalidation_condition | Yes       | dict with files/tools |
+| Intent normalization           | Yes          | canonical_task + hash-based identity (prevents duplication) |
+| Structured invalidation_condition | Yes       | dict with files/tools/memory_refs |
 | Cascade invalidation           | Yes          | Down + sideways via cached find_dependent_frames |
 | Git-aware change detection     | Yes          | commit_hash + git diff on load |
-| Query/intent tracking          | Yes          | initial_query saved |
+| Query/intent tracking          | Yes          | initial_query saved in FrameIndex |
 | ContextMap lazy loading        | Yes          | git ls-files + dynamic discovery inside working dir |
 | Multi-session resumption       | No           | Data model ready; needs UI/skill to resume branches |
 | Living docs / surgical updates | No           | Hooks ready; needs plugin to re-run invalidated frames |
@@ -282,6 +294,7 @@ Core: invalidation check → cascade
 | Weighted evidence | Prefer symbol-level granularity over tuning hell |
 | Full reasoning trace | Verbose mode sufficient; adds noise |
 | SQLite / MemoryBackend | JSONL per session, zero dependencies |
+| Query string in frame identity | Leads to duplication/entropy; use canonical_task + context hash instead |
 
 ---
 

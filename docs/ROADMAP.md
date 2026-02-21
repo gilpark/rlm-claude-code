@@ -6,13 +6,19 @@ Future development plans for the CausalFrame plugin.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  NOW: Phase 18 → Phase 19                                   │
-│  Tree/Evidence   UX                                         │
+│  NOW: Phase 18.5 — Structured LLM Output (JSON)            │
+│  Token savings + reliable parsing + explicit recursion     │
 ├─────────────────────────────────────────────────────────────┤
-│  NEXT: Phase 20 → Phase 9 → Phase 15                        │
-│  Multi-Repo   Living Docs   Performance                     │
+│  NEXT: Phase 19 — UX & Skills Standardization              │
+│  Make it feel like a real plugin (slash commands, discoverable)│
 ├─────────────────────────────────────────────────────────────┤
-│  BACKLOG: Visual viewer, export formats, reference dirs     │
+│  THEN: Phase 20 — Multi-Session Demo & Branch Resumption   │
+│  Prove the causal evolution loop works                      │
+├─────────────────────────────────────────────────────────────┤
+│  LATER: Phase 9 — Living Documentation (surgical updates)  │
+│  Show real value in CI/CD / git push workflows              │
+├─────────────────────────────────────────────────────────────┤
+│  BACKLOG: Phase 15, 16, 10, cross-repo, visual viewer, etc.│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -34,11 +40,11 @@ Externalize context so REPL navigates instead of reading files directly.
 
 **Goal:** REPL becomes a navigator of externalized context, not a file-system reader. Cross-session change detection via git diff.
 
-**Plan:** [2026-02-20-phase-17-contextmap.md](./plans/2026-02-20-phase-17-contextmap.md)
+**Plan:** [2026-02-20-phase-17-contextmap.md](./plans/completed/2026-02-20-phase-17-contextmap.md)
 
 ---
 
-## Phase 18: Tree Structure + Evidence + Cascade + Recursion
+## Phase 18: Tree Structure + Evidence + Cascade + Recursion ✓
 
 **Priority: HIGH** — Core gaps identified in code review feedback.
 
@@ -48,66 +54,120 @@ Transform linear chain into proper tree structure with evidence tracking AND ena
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Synchronous `llm(sub_query)` | Creates child frames, proper depth tracking (no subprocess) | Not Started |
-| Enhanced system prompt | Explicit recursion guidance with examples | Not Started |
-| Query/intent tracking | `initial_query` and `query_summary` in FrameIndex | Not Started |
+| Synchronous `llm(sub_query)` | Creates child frames, proper depth tracking (no subprocess) | ✅ Complete |
+| Enhanced system prompt | Explicit recursion guidance with examples | ✅ Complete |
+| Query/intent tracking | `initial_query` and `query_summary` in FrameIndex | ✅ Complete |
 
 ### Part B: Tree Structure + Evidence + Cascade
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Populate `children` in frames | When sub-task spawned, add to parent.children | Not Started |
-| Auto evidence tracking | Child frames → parent.evidence, tool outputs → evidence | Not Started |
-| Auto-generate `invalidation_condition` | Default: "any file in context_slice.files changes" | Not Started |
-| Stronger cascade propagation | Recurse children + evidence consumers on invalidation | Not Started |
-| `find_dependent_frames()` method | Scan frames for evidence references | Not Started |
+| Populate `children` in frames | When sub-task spawned, add to parent.children | ✅ Complete |
+| Auto evidence tracking | Child frames → parent.evidence, tool outputs → evidence | ✅ Complete |
+| Auto-generate `invalidation_condition` | Structured dict with files/tools/memory_refs | ✅ Complete |
+| Stronger cascade propagation | Recurse children + evidence consumers on invalidation | ✅ Complete |
+| `find_dependent_frames()` method | Scan frames for evidence references (with caching) | ✅ Complete |
+
+### Part C: Intent Normalization
+
+| Task | Description | Status |
+|------|-------------|--------|
+| `CanonicalTask` dataclass | task_type, target, scope, params with stable hash | ✅ Complete |
+| `extract_canonical_task()` | Language-agnostic intent extraction | ✅ Complete |
+| Frame identity by intent | hash(canonical_task + context_slice) prevents duplication | ✅ Complete |
 
 **Key Design Decision:** Use synchronous `llm(sub_query)` instead of subprocess.
 - Simpler, faster, no IPC overhead
 - Fits RLM ethos (recursive calls in same process)
-- Subprocess can be future work for isolation if needed
+- Depth derived from parent frame, not global counter
 
 **Goal:** Proper tree structure with working recursion and cascade invalidation when premises change.
 
-**Plan:** [2026-02-20-phase-18-tree-evidence.md](./plans/2026-02-20-phase-18-tree-evidence.md)
+**Plan:** [2026-02-20-phase-18-tree-evidence.md](./plans/completed/2026-02-20-phase-18-tree-evidence.md)
 
 ---
 
-## Phase 19: Causal Awareness UX
+## Phase 18.5: Structured LLM Output (JSON)
 
-**Priority: MEDIUM** — Make the system feel "alive" with query/navigation capabilities.
+**Priority: HIGH** — Token savings + reliable parsing + explicit recursion.
+
+Make `llm()` return structured JSON instead of raw text.
 
 | Task | Description | Status |
 |------|-------------|--------|
-| `/causalframe status <topic>` skill | Query valid frames, summarize still-valid conclusions | Not Started |
-| Branch resumption | Resume from suspended/invalidated frame with new evidence | Not Started |
-| Surface invalidated frames | Auto-show invalidated frames on session start | Not Started |
+| Update system prompt | Request JSON format with schema | Not Started |
+| Safe JSON parser | `parse_llm_response()` with fallback | Not Started |
+| Use parsed confidence | Frame creation uses JSON confidence | Not Started |
+| Handle `sub_tasks` | Auto-recurse when sub_tasks present | Not Started |
+| Unit tests | Parser edge cases | Not Started |
+| Integration tests | Token savings verification | Not Started |
 
-**Goal:** Model actively navigates causal store, not just passive persistence.
+**JSON Schema:**
+```json
+{
+  "reasoning": "Step-by-step thinking",
+  "conclusion": "Final answer",
+  "confidence": 0.85,
+  "files": ["auth.py"],
+  "sub_tasks": [{"query": "...", "priority": 1}],
+  "needs_more_info": false
+}
+```
+
+**Benefits:**
+- 30-40% token savings on complex responses
+- Reliable parsing (no fragile regex)
+- Explicit recursion via `sub_tasks`
+- Safe fallback when parsing fails
+
+**Goal:** Make LLM responses parseable, efficient, and recursion-aware.
+
+**Plan:** [2026-02-20-phase-18.5-structured-output.md](./plans/2026-02-20-phase-18.5-structured-output.md)
 
 ---
 
-## Phase 20: Cross-Repository Delegation
+## Phase 19: UX & Skills Standardization
 
-**Priority: MEDIUM** — Enable multi-repo awareness without scope leakage.
+**Priority: MEDIUM**
+**Dependencies:** Phase 18.5 (Structured Output) ✓
 
-When the agent needs to reference code in a related/sibling repo:
+Make the system feel "alive" with discoverable slash commands.
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Sub-agent spawning | Spawn sub-RLM agent scoped to target repo directory | Not Started |
-| Result delegation | Return result as evidence in child CausalFrame | Not Started |
-| Independent invalidation | Sub-agent gets own ContextMap + commit_hash | Not Started |
-| Reference roots flag | `--reference-dir ../utils` for read-only external paths | Not Started |
-| Restrictiveness toggle | User-configurable strict vs. dynamic discovery | Not Started |
+| `/causal` router skill | Single entry point, dispatches to sub-commands | Not Started |
+| `/causal analyze <target>` | Run RLAPH with canonical_task extraction | Not Started |
+| `/causal status [topic]` | Query valid frames, summarize still-valid conclusions | Not Started |
+| `/causal resume <frame_id>` | Resume suspended/invalidated branch with new evidence | Not Started |
+| `/causal tree [session]` | Visualize frame tree with depths and statuses | Not Started |
+| `run_rlaph()` library function | Refactor orchestrator as importable, callable function | Not Started |
+| SessionStart enhancement | Surface invalidated frames on session start | Not Started |
+| `--verbose` / `--depth` flags | Transparency and control via Claude's flag syntax | Not Started |
 
-**Goal:** Keep main agent's scope clean while enabling multi-repo awareness.
+**Goal:** Model actively navigates causal store with discoverable UX. Skills import `run_rlaph()` as library.
+
+**Plan:** [2026-02-20-phase-19-ux-skills.md](./plans/2026-02-20-phase-19-ux-skills.md)
+
+---
+
+## Phase 20: Multi-Session Demo & Branch Resumption
+
+**Priority: MEDIUM** — Prove the causal evolution loop works across sessions.
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 2-session change demo | Change file → targeted invalidation + reuse of unaffected frames | Not Started |
+| Branch resumption logic | Resume from suspended/invalidated frame with preserved intent | Not Started |
+| Intent reuse demo | Same canonical_task → reuse prior frame (no re-computation) | Not Started |
+| Living doc prototype | Change code → auto-update only affected doc sections | Not Started |
+
+**Goal:** Demonstrate real value: prior knowledge survives code changes, task reuse becomes visible.
 
 ---
 
 # Future Phases
 
-*These phases depend on Phase 17-19 being complete first.*
+*These phases depend on Phase 19-20 being complete first.*
 
 ---
 
@@ -117,8 +177,8 @@ As described in the whitepaper, these features enable the system to keep documen
 
 | Feature | Description | Status |
 |---------|-------------|--------|
-| Git diff → invalidation cascade | Detect code changes and invalidate dependent frames | → Phase 17/18 |
-| Frame re-execution | Re-run reasoning with preserved intent when code changes | Not Started |
+| Git diff → invalidation cascade | Detect code changes and invalidate dependent frames | → Phase 17/18 ✓ |
+| Frame re-execution | Re-run reasoning with preserved intent when code changes | → Phase 20 |
 | Selective documentation update | Update only affected docs based on invalidation graph | Not Started |
 
 **Goal:** When code changes, the system can identify which documentation became stale and re-generate it with the original reasoning intent.
@@ -133,31 +193,6 @@ Optional cleanup to reduce file count from 18 to target 12.
 | `tokenization.py` | 509 | Extract needed functions to `repl_environment.py` | Low |
 
 **Target:** 12 src files total (as per original v2 spec)
-
-## Phase 13: Claude Code Runtime Integration ✓
-
-Full integration testing with actual Claude Code environment.
-
-| Task | Description | Status |
-|------|-------------|--------|
-| FrameIndex persistence | Add save/load to JSON for cross-session frames | ✅ Complete |
-| RLAPHLoop save on exit | Save frames before session ends | ✅ Complete |
-| extract_frames hook | Load saved frames, persist to FrameStore | ✅ Complete |
-| SessionArtifacts persistence | Track file hashes for comparison | ✅ Complete |
-| compare_sessions hook | Compare with prior session, find invalidated frames | ✅ Complete |
-| Orchestrator status events | Add progress output for visibility | ✅ Complete |
-
-## Phase 14: Enhanced Verification ✓
-
-Build on Phase 12's hallucination fixes with more sophisticated validation.
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| Async file I/O | Parallel file reads (sync LLM + async I/O hybrid) | ✅ Complete |
-| Architecture docs | Document design decisions in ARCHITECTURE.md | ✅ Complete |
-| Semantic validation | Check if answer actually addresses the question | Future |
-| Code execution validation | Ensure code actually ran (not just claimed) | Future |
-| Multi-step verification | Verify each step in multi-step reasoning | Future |
 
 ## Phase 15: Performance Optimization
 
@@ -202,3 +237,4 @@ For historical reference, see [CHANGELOG.md](./CHANGELOG.md).
 - Phase 13: Claude Code Runtime Integration ✓ (2026-02-20)
 - Phase 14: Enhanced Verification ✓ (2026-02-20)
 - Phase 17: ContextMap + Git-Aware Loading ✓ (2026-02-20)
+- Phase 18: Tree Structure + Evidence + Cascade + Recursion ✓ (2026-02-20)
