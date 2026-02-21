@@ -125,10 +125,10 @@ class FrameStore:
         sessions = []
         for session_dir in frames_dir.iterdir():
             if session_dir.is_dir():
-                # Check for artifacts.json to validate session
-                artifacts_path = session_dir / "artifacts.json"
-                if artifacts_path.exists():
-                    sessions.append((session_dir.name, artifacts_path.stat().st_mtime))
+                # Check for index.json to validate session (FrameIndex persistence)
+                index_path = session_dir / "index.json"
+                if index_path.exists():
+                    sessions.append((session_dir.name, index_path.stat().st_mtime))
 
         if not sessions:
             return None
