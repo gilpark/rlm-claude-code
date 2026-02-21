@@ -199,3 +199,100 @@ class RLMConfig:
 
 # Default configuration instance
 default_config = RLMConfig()
+
+
+# -----------------------------------------------------------------------------
+# CausalFrame Configuration
+# -----------------------------------------------------------------------------
+
+CONFIG_PATH = Path.home() / ".claude" / "causalframe-config.json"
+
+DEFAULT_CF_CONFIG = {
+    "default_max_depth": 3,
+    "default_verbose": False,
+    "status_limit": 5,
+    "default_model": "sonnet",
+    "status_icons": True,
+    "reference_dirs": [],
+    "auto_resume_on_invalidate": False,
+}
+
+
+@dataclass
+class CFConfig:
+    """
+    CausalFrame user configuration.
+
+    Provides UX settings for CausalFrame operations like depth limits,
+    verbosity, status display, and auto-resume behavior.
+
+    Separate from RLMConfig which handles model/routing settings.
+    """
+
+    default_max_depth: int = 3
+    default_verbose: bool = False
+    status_limit: int = 5
+    default_model: str = "sonnet"
+    status_icons: bool = True
+    reference_dirs: list[str] = field(default_factory=list)
+    auto_resume_on_invalidate: bool = False
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "CFConfig":
+        """
+        Load config from file with defaults.
+
+        Args:
+            path: Optional config file path. Defaults to ~/.claude/causalframe-config.json
+
+        Returns:
+            CFConfig instance with user settings merged with defaults
+        """
+        if path is None:
+            path = CONFIG_PATH
+
+        config = DEFAULT_CF_CONFIG.copy()
+
+        if path.exists():
+            try:
+                user_config = json.loads(path.read_text())
+                config.update(user_config)
+            except (json.JSONDecodeError, IOError):
+                # Use defaults on error
+                pass
+
+        # Filter to only valid fields for the dataclass
+        filtered = _filter_dataclass_fields(config, cls)
+
+        return cls(**filtered)
+
+    def save(self, path: Path | None = None) -> None:
+        """
+        Save configuration to file.
+
+        Args:
+            path: Optional config file path. Defaults to ~/.claude/causalframe-config.json
+        """
+        if path is None:
+            path = CONFIG_PATH
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, "w") as f:
+            json.dump(
+                {
+                    "default_max_depth": self.default_max_depth,
+                    "default_verbose": self.default_verbose,
+                    "status_limit": self.status_limit,
+                    "default_model": self.default_model,
+                    "status_icons": self.status_icons,
+                    "reference_dirs": self.reference_dirs,
+                    "auto_resume_on_invalidate": self.auto_resume_on_invalidate,
+                },
+                f,
+                indent=2,
+            )
+
+
+# Default CausalFrame configuration instance
+default_cf_config = CFConfig()
