@@ -40,6 +40,45 @@ def find_most_recent_session(current_session_id: str) -> str | None:
     return sessions[0][0]
 
 
+def _print_invalidated_frames_summary(
+    prior_session_id: str,
+    invalidated_frame_ids: list[str],
+    prior_index: "FrameIndex | None"
+) -> None:
+    """
+    Print user-friendly summary of invalidated frames.
+
+    Shows:
+    - Prior session ID
+    - List of invalidated frames with descriptions (up to 5)
+    - Count if more than 5
+    - Proactive suggestion to use /causal resume
+    """
+    if not invalidated_frame_ids:
+        return
+
+    print("\n## Invalidated Frames from Prior Session\n")
+    print(f"Session: `{prior_session_id}`\n")
+
+    # Load frames to get descriptions
+    for i, frame_id in enumerate(invalidated_frame_ids[:5]):
+        frame = prior_index.get(frame_id) if prior_index else None
+        if frame:
+            desc = (
+                frame.invalidation_condition.get("description", "Unknown reason")
+                if frame.invalidation_condition
+                else "Unknown reason"
+            )
+            print(f"- {frame_id[:8]}: {desc}")
+        else:
+            print(f"- {frame_id[:8]}: (frame not found in index)")
+
+    if len(invalidated_frame_ids) > 5:
+        print(f"\n... and {len(invalidated_frame_ids) - 5} more.")
+
+    print("\nSuggestion: Use `/causal resume` to re-run invalidated frames.\n")
+
+
 def main():
     """Main entry point for hook."""
     # Read hook input from stdin
@@ -93,6 +132,14 @@ def main():
     }
 
     print(json.dumps(output, indent=2))
+
+    # User-friendly output for invalidated frames
+    _print_invalidated_frames_summary(
+        prior_session_id,
+        diff.invalidated_frame_ids,
+        prior_index
+    )
+
     sys.exit(0)
 
 
