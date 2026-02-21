@@ -193,21 +193,21 @@ def generate_help_text() -> str:
     Returns:
         Formatted help text with all commands, descriptions, and examples
     """
-    help_text = "## /causal Commands\\n\\n"
-    help_text += "| Command | Description | Example |\\n"
-    help_text += "|---------|-------------|----------|\\n"
+    help_text = "## /causal Commands\n\n"
+    help_text += "| Command | Description | Example |\n"
+    help_text += "|---------|-------------|----------|\n"
 
     for cmd, info in COMMANDS.items():
-        help_text += f"| {cmd} | {info['description']} | `{info['example']}` |\\n"
+        help_text += f"| {cmd} | {info['description']} | `{info['example']}` |\n"
 
-    help_text += "\\n### Flags\\n\\n"
-    help_text += "| Flag | Effect |\\n"
-    help_text += "|------|--------|\\n"
-    help_text += "| `--verbose` | Show recursion logs and frame details |\\n"
-    help_text += "| `--depth N` | Max recursion depth (default: 3) |\\n"
-    help_text += "| `--scope X` | Analysis scope (correctness, security, etc.) |\\n"
-    help_text += "| `--last` | Target most recent session |\\n"
-    help_text += "| `--session ID` | Target specific session |\\n"
+    help_text += "\n### Flags\n\n"
+    help_text += "| Flag | Effect |\n"
+    help_text += "|------|--------|\n"
+    help_text += "| `--verbose` | Show recursion logs and frame details |\n"
+    help_text += "| `--depth N` | Max recursion depth (default: 3) |\n"
+    help_text += "| `--scope X` | Analysis scope (correctness, security, etc.) |\n"
+    help_text += "| `--last` | Target most recent session |\n"
+    help_text += "| `--session ID` | Target specific session |\n"
 
     return help_text
 
