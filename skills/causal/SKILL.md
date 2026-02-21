@@ -1,6 +1,9 @@
 ---
 name: causal
-description: CausalFrame commands for causal reasoning and frame navigation
+description: |
+  CausalFrame commands for causal reasoning and frame navigation.
+  Commands: analyze, summarize, debug, status, tree, resume, clear-cache, help.
+  Use /causal help to see all options.
 invocable: true
 ---
 

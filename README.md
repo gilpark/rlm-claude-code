@@ -107,10 +107,6 @@ The main entry point for CausalFrame commands:
 - `debugger` - Bug hunting (depth 5)
 - `security` - Security auditing (depth 4)
 
-#### Other Skills
-
-- `/verification` - Constraint verification for proposed changes
-
 ### Configuration
 
 Create `~/.claude/causalframe-config.json`:

@@ -302,30 +302,49 @@ Core: invalidation check → cascade
 
 ```
 src/
-├── rlaph_loop.py            # immediate execution loop with recursion
-├── repl_environment.py      # peek, search, llm, llm_batch, map_reduce
-├── llm_client.py            # provider-agnostic LLM calls
-├── tool_bridge.py           # controlled tool access
-├── causal_frame.py          # CausalFrame, FrameStatus, compute_frame_id
-├── canonical_task.py        # Intent normalization
-├── intent_extractor.py      # query → canonical_task
-├── context_slice.py         # ContextSlice, hash, budget
-├── frame_index.py           # dict[str, CausalFrame], branch queries, initial_query
-├── frame_invalidation.py    # propagate_invalidation, find_dependent_frames
-├── frame_store.py           # JSONL: save, load, list
-├── session_artifacts.py     # SessionArtifacts, FileRecord
-├── session_comparison.py    # compare_sessions, SessionDiff
+├── repl/
+│   ├── rlaph_loop.py        # immediate execution loop with recursion
+│   ├── repl_environment.py  # peek, search, llm, llm_batch, map_reduce
+│   ├── llm_client.py        # provider-agnostic LLM calls
+│   ├── tool_bridge.py       # controlled tool access
+│   ├── response_parser.py   # parse LLM output
+│   ├── json_parser.py       # structured response parsing
+│   └── prompts.py           # system prompt templates
+├── frame/
+│   ├── causal_frame.py      # CausalFrame, FrameStatus, compute_frame_id
+│   ├── canonical_task.py    # Intent normalization
+│   ├── intent_extractor.py  # query → canonical_task
+│   ├── context_slice.py     # ContextSlice, hash, budget
+│   ├── context_map.py       # git-aware file tracking
+│   ├── frame_index.py       # dict[str, CausalFrame], branch queries
+│   ├── frame_invalidation.py # propagate_invalidation, find_dependent_frames
+│   └── frame_store.py       # JSONL: save, load, list
+├── session/
+│   ├── session_artifacts.py # SessionArtifacts, FileRecord
+│   └── session_comparison.py # compare_sessions, SessionDiff
+├── agents/
+│   ├── sub_agent.py         # RLMSubAgent wrapper
+│   └── presets.py           # analyzer, summarizer, debugger, security
+├── skills/
+│   └── causal_router.py     # /causal command dispatcher
+├── config.py                # RLMConfig + CFConfig
+├── types.py                 # type definitions
+├── tokenization.py          # token partitioning
 └── plugin_interface.py      # CoreContext, RLMPlugin protocol (future)
 
 scripts/
+├── causal_cli.py            # CLI entry point for /causal skill
+├── compare_sessions.py      # SessionStart hook: diff + surface
+├── capture_output.py        # PostToolUse hook: capture tool output
 ├── extract_frames.py        # Stop hook: extract + save
-└── compare_sessions.py      # SessionStart hook: diff + surface
+├── get_session_id.py        # session ID utilities
+└── run_orchestrator.py      # standalone orchestrator (dev/test)
 
 hooks/
 └── hooks.json               # SessionStart, PostToolUse, Stop
 ```
 
-**14 src files. 2 scripts. 1 hooks file.**
+**26 src files. 6 scripts. 1 hooks file.**
 
 ---
 

@@ -2,6 +2,50 @@
 
 All notable changes to CausalFrame are documented in this file.
 
+## [0.0.2] - 2026-02-21
+
+### Phase 18.5+ Cleanup - Codebase Hygiene
+
+**Overview:** Removed 22 unused files after Phase 18.5 completion.
+
+### Deleted Files
+
+**Migration Scripts (one-time use):**
+- `scripts/migrate_sessions.py`
+- `scripts/migrate_to_frames.py`
+- `scripts/merge-plugin-hooks.py`
+
+**Setup Scripts (obsolete):**
+- `scripts/setup-rlm-core.sh`
+- `scripts/set-api-key.sh`
+- `scripts/setup_repl_env.sh`
+- `scripts/capture_session_context.sh`
+- `scripts/verify_rlm.py`
+
+**Shell Hook Scripts (replaced by Python hooks):**
+- Entire `scripts/hooks/` directory (11 files)
+
+**Old Test Files:**
+- `test_llm_repl.py`
+- `test_rlaph_fast.py`
+- `test_rlaph_loop.py`
+
+### Documentation Updates
+
+- Updated README.md: removed reference to deleted `/verification` skill
+- Updated DESIGN.md: corrected file list to match current structure
+
+### Remaining Scripts (Active)
+
+| Script | Purpose |
+|--------|---------|
+| `causal_cli.py` | CLI entry point for `/causal` skill |
+| `compare_sessions.py` | SessionStart hook |
+| `capture_output.py` | PostToolUse hook |
+| `extract_frames.py` | Stop hook |
+| `get_session_id.py` | Session ID utilities |
+| `run_orchestrator.py` | Standalone orchestrator (dev/test) |
+
 ## [0.0.1] - 2026-02-19
 
 ### Initial Release - RLM v2 Refactoring Complete
