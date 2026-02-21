@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ..repl.rlaph_loop import RLAPHLoop, RLPALoopResult
 from ..frame.canonical_task import CanonicalTask
@@ -93,10 +93,6 @@ class RLMSubAgent:
                 max depth, scope, and verbosity settings.
         """
         self.config = config
-        self.loop = RLAPHLoop(
-            max_depth=config.default_max_depth,
-            verbose=config.verbose,
-        )
 
     async def run(
         self,
@@ -104,7 +100,7 @@ class RLMSubAgent:
         working_dir: Path | None = None,
         session_id: str | None = None,
         canonical_task: CanonicalTask | None = None,
-        max_depth: Optional[int] = None,
+        max_depth: int | None = None,
         context: SessionContext | None = None,
     ) -> RLPALoopResult:
         """Run this sub-agent with optional overrides.
@@ -118,9 +114,7 @@ class RLMSubAgent:
             working_dir: Working directory for file operations (default: cwd).
             session_id: Optional session identifier for frame persistence
                 (default: auto-generated UUID[:8]).
-            canonical_task: Optional CanonicalTask for frame deduplication.
-                If not provided, a default one is created using the config's
-                default_scope.
+            canonical_task: Reserved for future frame deduplication features.
             max_depth: Override the default max_depth for this run (default:
                 use config.default_max_depth).
             context: Optional session context (default: empty SessionContext).
@@ -130,12 +124,6 @@ class RLMSubAgent:
             metadata.
         """
         effective_depth = max_depth or self.config.default_max_depth
-        effective_task = canonical_task or CanonicalTask(
-            task_type="analyze",
-            target="**/*",
-            analysis_scope=self.config.default_scope,
-            params={}
-        )
 
         # Inject persona into query if override exists
         full_query = query

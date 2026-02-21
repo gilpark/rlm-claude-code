@@ -58,27 +58,19 @@ class TestRLMSubAgentInit:
     """Test suite for RLMSubAgent initialization."""
 
     def test_init_creates_loop_with_config_depth(self):
-        """RLMSubAgent should create RLAPHLoop with config max_depth."""
-        with patch("src.agents.sub_agent.RLAPHLoop") as MockLoop:
-            mock_loop = MagicMock()
-            MockLoop.return_value = mock_loop
+        """RLMSubAgent should store config with max_depth."""
+        config = RLMSubAgentConfig(name="test", default_max_depth=5)
+        agent = RLMSubAgent(config)
 
-            config = RLMSubAgentConfig(name="test", default_max_depth=5)
-            agent = RLMSubAgent(config)
-
-            MockLoop.assert_called_once_with(max_depth=5, verbose=False)
-            assert agent.config is config
+        assert agent.config is config
+        assert agent.config.default_max_depth == 5
 
     def test_init_creates_loop_with_verbose(self):
-        """RLMSubAgent should create RLAPHLoop with verbose setting."""
-        with patch("src.agents.sub_agent.RLAPHLoop") as MockLoop:
-            mock_loop = MagicMock()
-            MockLoop.return_value = mock_loop
+        """RLMSubAgent should store config with verbose setting."""
+        config = RLMSubAgentConfig(name="test", verbose=True)
+        agent = RLMSubAgent(config)
 
-            config = RLMSubAgentConfig(name="test", verbose=True)
-            agent = RLMSubAgent(config)
-
-            MockLoop.assert_called_once_with(max_depth=3, verbose=True)
+        assert agent.config.verbose is True
 
     def test_init_stores_config(self):
         """RLMSubAgent should store the provided config."""
@@ -88,21 +80,18 @@ class TestRLMSubAgentInit:
 
     def test_init_with_all_config_options(self):
         """RLMSubAgent should work with all config options."""
-        with patch("src.agents.sub_agent.RLAPHLoop") as MockLoop:
-            mock_loop = MagicMock()
-            MockLoop.return_value = mock_loop
+        config = RLMSubAgentConfig(
+            name="specialist",
+            system_prompt_override="You are a specialist.",
+            default_max_depth=7,
+            default_scope="security",
+            verbose=True,
+        )
+        agent = RLMSubAgent(config)
 
-            config = RLMSubAgentConfig(
-                name="specialist",
-                system_prompt_override="You are a specialist.",
-                default_max_depth=7,
-                default_scope="security",
-                verbose=True,
-            )
-            agent = RLMSubAgent(config)
-
-            MockLoop.assert_called_once_with(max_depth=7, verbose=True)
-            assert agent.config.name == "specialist"
+        assert agent.config.name == "specialist"
+        assert agent.config.default_max_depth == 7
+        assert agent.config.verbose is True
 
 
 class TestRLMSubAgentRun:
@@ -128,9 +117,8 @@ class TestRLMSubAgentRun:
 
             await agent.run("test query")
 
-            # Second loop creation should use config depth
-            assert MockLoop.call_count == 2  # init + run
-            # The last call (from run) should have max_depth=4
+            # Loop should be created in run() with config depth
+            assert MockLoop.call_count == 1
             last_call_args = MockLoop.call_args_list[-1]
             assert last_call_args[1]["max_depth"] == 4
 
