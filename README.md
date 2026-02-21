@@ -50,6 +50,22 @@ uv sync
 
 ## Usage
 
+### Quick Start
+
+```bash
+# Analyze code
+/causal analyze src/auth.py --scope security
+
+# Check status of prior reasoning
+/causal status
+
+# View frame tree
+/causal tree
+
+# Resume invalidated analysis
+/causal resume 82ab3024
+```
+
 ### As a Claude Code Plugin
 
 Add to your `~/.claude/settings.json`:
@@ -61,8 +77,53 @@ Add to your `~/.claude/settings.json`:
 
 ### Skills
 
-- `/causalframe` - Activate causal mode for complex reasoning
+#### `/causal` Command Router
+
+The main entry point for CausalFrame commands:
+
+```
+/causal analyze <target> [--scope security] [--depth 3] [--verbose]
+/causal summarize <target>                  # Quick summary
+/causal debug <target>                      # Bug hunting
+/causal status [topic] [--last]             # Show valid/invalidated frames
+/causal tree [--last]                       # Visualize frame tree
+/causal resume <frame_id>                   # Resume invalidated branch
+/causal clear-cache                         # Force fresh ContextMap
+/causal help                                # Show all commands
+```
+
+**Flags:**
+| Flag | Effect |
+|------|--------|
+| `--verbose` | Show recursion logs and frame details |
+| `--depth N` | Max recursion depth (default: 3) |
+| `--scope X` | Analysis scope (correctness, security, architecture) |
+| `--last` | Target most recent session |
+| `--session ID` | Target specific session |
+
+**Pre-defined Agents:**
+- `analyzer` - Detailed code analysis (depth 4)
+- `summarizer` - Concise summaries (depth 2)
+- `debugger` - Bug hunting (depth 5)
+- `security` - Security auditing (depth 4)
+
+#### Other Skills
+
 - `/verification` - Constraint verification for proposed changes
+
+### Configuration
+
+Create `~/.claude/causalframe-config.json`:
+
+```json
+{
+  "default_max_depth": 3,
+  "default_verbose": false,
+  "status_limit": 5,
+  "default_model": "sonnet",
+  "status_icons": true
+}
+```
 
 ### Hooks
 
@@ -78,16 +139,22 @@ CausalFrame hooks into Claude Code's lifecycle:
 
 ```
 src/
-├── rlaph_loop.py          # Immediate execution loop
+├── rlaph_loop.py          # Immediate execution loop + run_rlaph()
 ├── repl_environment.py    # peek, search, llm functions
-├── llm_client.py          # Provider-agnostic LLM calls
+├── llm_client.py          # SDK streaming LLM calls
+├── config.py              # RLMConfig + CFConfig
 ├── causal_frame.py        # CausalFrame, FrameStatus
 ├── frame_store.py         # JSONL persistence
 ├── frame_invalidation.py  # Cascade invalidation
-└── session_comparison.py  # Cross-session diff
+├── session_comparison.py  # Cross-session diff
+├── agents/
+│   ├── sub_agent.py       # RLMSubAgent wrapper
+│   └── presets.py         # analyzer, summarizer, debugger, security
+└── skills/
+    └── causal_router.py   # /causal command dispatcher
 ```
 
-**18 src files. Zero SQL dependencies. Human-readable JSONL.**
+**Zero SQL dependencies. Human-readable JSONL.**
 
 ## The Vision
 
