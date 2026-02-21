@@ -135,14 +135,18 @@ Make the system feel "alive" with discoverable slash commands.
 
 | Task | Description | Status |
 |------|-------------|--------|
+| SDK streaming refactor | Real-time UX with typing effect | Not Started |
+| Config file support | `~/.claude/causalframe-config.json` | Not Started |
+| `run_rlaph()` library | Importable function with stream param | Not Started |
+| `RLMSubAgent` class | Wrapper for specialized personas | Not Started |
+| Pre-defined sub-agents | analyzer, summarizer, debugger, security | Not Started |
 | `/causal` router skill | Single entry point, dispatches to sub-commands | Not Started |
-| `/causal analyze <target>` | Run RLAPH with canonical_task extraction | Not Started |
-| `/causal status [topic]` | Query valid frames, summarize still-valid conclusions | Not Started |
-| `/causal resume <frame_id>` | Resume suspended/invalidated branch with new evidence | Not Started |
-| `/causal tree [session]` | Visualize frame tree with depths and statuses | Not Started |
-| `run_rlaph()` library function | Refactor orchestrator as importable, callable function | Not Started |
-| SessionStart enhancement | Surface invalidated frames on session start | Not Started |
-| `--verbose` / `--depth` flags | Transparency and control via Claude's flag syntax | Not Started |
+| `/causal status` | Dashboard with valid/invalidated/suspended frames | Not Started |
+| `/causal tree` | Visualize frame tree with icons | Not Started |
+| `/causal resume` | Resume suspended/invalidated branch | Not Started |
+| `/causal clear-cache` | Force fresh ContextMap | Not Started |
+| SessionStart enhancement | Surface invalidated frames + suggestions | Not Started |
+| Verbose mode expansion | Show frame details in logs | Not Started |
 
 **Goal:** Model actively navigates causal store with discoverable UX. Skills import `run_rlaph()` as library.
 

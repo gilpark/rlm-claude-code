@@ -264,8 +264,70 @@ class LLMClient:
 - Real-time typing effect for better UX
 - Uniform interface for all LLM calls
 - Backward compatible with existing `call()` method
+- UX markers: "Thinking..." at start, "Done" at end
 
-### Task 2: `run_rlaph()` Library Function
+### Task 2: Config File Support
+
+**File:** `src/config.py` (add to existing or create new)
+
+```python
+import json
+from pathlib import Path
+from dataclasses import dataclass, field
+
+CONFIG_PATH = Path.home() / ".claude" / "causalframe-config.json"
+
+DEFAULT_CONFIG = {
+    "default_max_depth": 3,
+    "default_verbose": False,
+    "status_limit": 5,
+    "default_model": "sonnet",
+    "status_icons": True,
+}
+
+@dataclass
+class CFConfig:
+    """CausalFrame user configuration."""
+    default_max_depth: int = 3
+    default_verbose: bool = False
+    status_limit: int = 5
+    default_model: str = "sonnet"
+    status_icons: bool = True
+    reference_dirs: list[str] = field(default_factory=list)
+    auto_resume_on_invalidate: bool = False
+
+    @classmethod
+    def load(cls) -> "CFConfig":
+        """Load config from file with defaults."""
+        config = DEFAULT_CONFIG.copy()
+        if CONFIG_PATH.exists():
+            try:
+                user_config = json.loads(CONFIG_PATH.read_text())
+                config.update(user_config)
+            except (json.JSONDecodeError, IOError):
+                pass  # Use defaults on error
+        return cls(
+            default_max_depth=config["default_max_depth"],
+            default_verbose=config["default_verbose"],
+            status_limit=config["status_limit"],
+            default_model=config["default_model"],
+            status_icons=config["status_icons"],
+        )
+```
+
+**Config file location:** `~/.claude/causalframe-config.json`
+
+```json
+{
+  "default_max_depth": 3,
+  "default_verbose": false,
+  "status_limit": 5,
+  "default_model": "sonnet",
+  "status_icons": true
+}
+```
+
+### Task 3: `run_rlaph()` Library Function
 
 **File:** `src/repl/rlaph_loop.py`
 
@@ -295,7 +357,7 @@ async def run_rlaph(
     return await loop.run(query, ctx, wd, session_id)
 ```
 
-### Task 3: `RLMSubAgent` Class
+### Task 4: `RLMSubAgent` Class
 
 **File:** `src/agents/sub_agent.py` (NEW)
 
@@ -365,7 +427,7 @@ class RLMSubAgent:
         return result
 ```
 
-### Task 4: Pre-defined Sub-Agents
+### Task 5: Pre-defined Sub-Agents
 
 **File:** `src/agents/presets.py` (NEW)
 
@@ -410,7 +472,7 @@ security_agent = RLMSubAgent(
 )
 ```
 
-### Task 5: `/causal` Router Skill
+### Task 6: `/causal` Router Skill
 
 **File:** `skills/causal.md` (or update existing `causeway:causal`)
 
@@ -579,11 +641,17 @@ def generate_help_text() -> str:
     return help_text
 ```
 
-### Task 6: `/causal status` Handler
+### Task 7: `/causal status` Handler (Dashboard Format)
 
 ```python
 async def cmd_status(topic: str | None, args: dict) -> str:
-    """Show valid/invalidated frames with emoji icons."""
+    """Show causal awareness dashboard with valid/invalidated frames."""
+    from src.config import CFConfig
+
+    config = CFConfig.load()
+    limit = config.status_limit
+    use_icons = config.status_icons
+
     session_id = get_session_id(args)
     index = FrameStore.load(session_id)
 
@@ -601,31 +669,107 @@ async def cmd_status(topic: str | None, args: dict) -> str:
     invalidated = [f for f in frames if f.status == FrameStatus.INVALIDATED]
     suspended = [f for f in frames if f.status == FrameStatus.SUSPENDED]
 
-    output = "## Frame Status\n\n"
-    output += f"**Session:** `{session_id}`\n\n"
-    output += "| Status | Frame | Query | Confidence |\n"
-    output += "|--------|-------|-------|------------|\n"
+    # Icons
+    icon_valid = "✓" if use_icons else "[OK]"
+    icon_invalid = "✗" if use_icons else "[X]"
+    icon_suspended = "⏸" if use_icons else "[...]"
 
-    for f in completed[:5]:
-        query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
-        output += f"| ✓ | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
+    # Build dashboard
+    output = "## CausalFrame Status\n\n"
+    output += f"**Session:** `{session_id}` (most recent; use --session ID for others)\n\n"
 
-    for f in invalidated[:3]:
-        query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
-        output += f"| ✗ | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
-
-    for f in suspended[:3]:
-        query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
-        output += f"| ⏸ | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
-
-    # Proactive suggestion
+    # Summary section
+    output += "### Summary\n"
+    output += f"- Valid frames: {len(completed)} ({icon_valid})\n"
     if invalidated:
-        output += f"\n**{len(invalidated)} frames invalidated.** Try `/causal resume` or `/causal status --full`?\n"
+        output += f"- Invalidated frames: {len(invalidated)} ({icon_invalid}) — re-run with `/causal resume`\n"
+    else:
+        output += f"- Invalidated frames: 0 ({icon_invalid}) — all knowledge is current\n"
+    if suspended:
+        output += f"- Suspended branches: {len(suspended)} ({icon_suspended}) — ready to resume\n"
+    else:
+        output += f"- Suspended branches: 0 ({icon_suspended}) — none ready to resume\n"
+    output += "\n"
+
+    # Valid frames table
+    if completed:
+        output += "### Valid Frames\n"
+        output += "| Status | Frame | Query | Confidence |\n"
+        output += "|--------|-------|-------|------------|\n"
+
+        for f in completed[:limit]:
+            query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
+            output += f"| {icon_valid} | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
+
+        if len(completed) > limit:
+            output += f"\n... and {len(completed) - limit} more. Use `--full` to see all.\n"
+        output += "\n"
+
+    # Invalidated frames table
+    if invalidated:
+        output += "### Invalidated Frames\n"
+        output += "| Status | Frame | Reason | Confidence |\n"
+        output += "|--------|-------|--------|------------|\n"
+
+        for f in invalidated[:limit]:
+            query_short = f.query[:30] + "..." if len(f.query) > 30 else f.query
+            reason = f.invalidation_condition.get("description", "Unknown") if f.invalidation_condition else "Unknown"
+            reason_short = reason[:30] + "..." if len(reason) > 30 else reason
+            output += f"| {icon_invalid} | `{f.frame_id[:8]}` | {reason_short} | {f.confidence:.1f} |\n"
+
+        if len(invalidated) > limit:
+            output += f"\n... and {len(invalidated) - limit} more.\n"
+        output += "\n"
+
+    # Suspended frames table
+    if suspended:
+        output += "### Suspended Branches\n"
+        output += "| Status | Frame | Query | Confidence |\n"
+        output += "|--------|-------|-------|------------|\n"
+
+        for f in suspended[:limit]:
+            query_short = f.query[:40] + "..." if len(f.query) > 40 else f.query
+            output += f"| {icon_suspended} | `{f.frame_id[:8]}` | {query_short} | {f.confidence:.1f} |\n"
+        output += "\n"
+
+    # Suggestions section
+    output += "**Suggestions:**\n"
+    if invalidated:
+        first_invalidated = invalidated[0].frame_id[:8]
+        output += f"- Invalidated? Try `/causal resume {first_invalidated}`\n"
+    output += "- More details: `/causal status --full` or `/causal tree`\n"
 
     return output
 ```
 
-### Task 7: `/causal tree` Handler
+**Example output:**
+```
+## CausalFrame Status
+
+**Session:** `recursion_test` (most recent; use --session ID for others)
+
+### Summary
+- Valid frames: 4 (✓)
+- Invalidated frames: 1 (✗) — re-run with `/causal resume`
+- Suspended branches: 0 (⏸) — none ready to resume
+
+### Valid Frames
+| Status | Frame | Query | Confidence |
+|--------|-------|-------|------------|
+| ✓ | `99c74b...` | Analyze both src/frame... | 0.8 |
+| ✓ | `9a0a68...` | Read the frame_index.py file... | 0.8 |
+
+### Invalidated Frames
+| Status | Frame | Reason | Confidence |
+|--------|-------|--------|------------|
+| ✗ | `f4c81a...` | File src/auth.py changed | 0.8 |
+
+**Suggestions:**
+- Invalidated? Try `/causal resume f4c81a...`
+- More details: `/causal status --full` or `/causal tree`
+```
+
+### Task 8: `/causal tree` Handler
 
 ```python
 async def cmd_tree(args: dict) -> str:
@@ -663,7 +807,7 @@ async def cmd_tree(args: dict) -> str:
     return output
 ```
 
-### Task 8: `/causal resume` Handler
+### Task 9: `/causal resume` Handler
 
 ```python
 async def cmd_resume(frame_id: str | None, args: dict) -> str:
@@ -701,7 +845,7 @@ async def cmd_resume(frame_id: str | None, args: dict) -> str:
     return f"## Resumed Frame `{frame_id[:8]}`\n\n{result.answer}"
 ```
 
-### Task 9: `/causal clear-cache` Handler
+### Task 10: `/causal clear-cache` Handler
 
 ```python
 def cmd_clear_cache() -> str:
@@ -714,7 +858,7 @@ def cmd_clear_cache() -> str:
     return "✓ ContextMap cache cleared. Next run will re-scan files."
 ```
 
-### Task 10: SessionStart Enhancement
+### Task 11: SessionStart Enhancement
 
 **File:** `hooks/session_start.py`
 
@@ -746,7 +890,7 @@ def session_start_hook(context):
         print("\n**Suggestion:** Use `/causal resume` to re-run invalidated frames.\n")
 ```
 
-### Task 11: Verbose Mode Expansion
+### Task 12: Verbose Mode Expansion
 
 **File:** `src/repl/rlaph_loop.py`
 
@@ -770,16 +914,19 @@ if self._verbose:
 | File | Change | Lines |
 |------|--------|-------|
 | `src/repl/llm_client.py` | Refactor to SDK + streaming | +40 |
+| `src/config.py` | Add CFConfig class for user config | +35 |
 | `src/repl/rlaph_loop.py` | Add `run_rlaph()` + stream support + verbose | +30 |
 | `src/agents/sub_agent.py` | NEW: RLMSubAgent class | +50 |
 | `src/agents/presets.py` | NEW: Pre-configured agents | +40 |
 | `src/agents/__init__.py` | NEW: Package init | +5 |
 | `skills/causal.md` | Router skill | +10 |
-| `src/skills/causal_router.py` | Command handlers | +150 |
+| `src/skills/causal_router.py` | Command handlers (enhanced status) | +170 |
 | `hooks/session_start.py` | Enhancement | +20 |
 | `src/frame/frame_store.py` | Add `find_most_recent_session()` | +10 |
 
-**Total:** ~355 lines of new/changed code
+**Total:** ~410 lines of new/changed code
+
+**Config file:** `~/.claude/causalframe-config.json` (created on first use with defaults)
 
 ---
 
