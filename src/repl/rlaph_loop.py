@@ -303,6 +303,17 @@ class RLAPHLoop:
                     self.frame_index.add(frame)
                     self._current_frame_id = frame.frame_id
 
+                    # Verbose mode: print frame details (Task 70)
+                    if self._verbose:
+                        print(f"[RLM] Frame created:")
+                        print(f"[RLM]   id: {frame.frame_id}")
+                        print(f"[RLM]   depth: {frame.depth}")
+                        print(f"[RLM]   parent: {frame.parent_id}")
+                        if frame.canonical_task:
+                            print(f"[RLM]   canonical_task: {frame.canonical_task}")
+                        print(f"[RLM]   invalidation_condition: {frame.invalidation_condition}")
+                        print(f"[RLM]   evidence: {frame.evidence}")
+
                     # Track files accessed for verification
                     self._last_repl_files_accessed = list(self.repl.files_read.keys())
 
@@ -480,6 +491,17 @@ class RLAPHLoop:
         )
 
         self.frame_index.add(child_frame)
+
+        # Verbose mode: print frame details (Task 70)
+        if self._verbose:
+            print(f"[RLM] Frame created:")
+            print(f"[RLM]   id: {child_frame.frame_id}")
+            print(f"[RLM]   depth: {child_frame.depth}")
+            print(f"[RLM]   parent: {child_frame.parent_id}")
+            if child_frame.canonical_task:
+                print(f"[RLM]   canonical_task: {child_frame.canonical_task}")
+            print(f"[RLM]   invalidation_condition: {child_frame.invalidation_condition}")
+            print(f"[RLM]   evidence: {child_frame.evidence}")
 
         return result
 
