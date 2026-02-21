@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .context_slice import ContextSlice
+    from .canonical_task import CanonicalTask
 
 
 class FrameStatus(Enum):
@@ -34,27 +35,29 @@ class CausalFrame:
     - frame_id is deterministic for caching
     """
 
-    # Identity — DETERMINISTIC
+    # Identity — DETERMINISTIC (no defaults)
     frame_id: str                 # hash(parent_id + query + context_slice.hash())
     depth: int                    # 0 = root
     parent_id: str | None
     children: list[str]
 
-    # Reasoning
+    # Reasoning (no defaults)
     query: str
     context_slice: "ContextSlice"
     evidence: list[str]           # Frame IDs + raw observations
     conclusion: str | None
     confidence: float             # 0.0-1.0, Core records, Root LM decides policy
-    invalidation_condition: str   # What would make this wrong
+    invalidation_condition: dict  # Structured: {"files": [...], "tools": [...], "memory_refs": [...], "description": "..."}
 
     # Branch + propagation control
     status: FrameStatus
-    branched_from: str | None     # If pivot: which frame this branched from
-    escalation_reason: str | None # Why this frame was escalated/suspended
-
     created_at: datetime
-    completed_at: datetime | None
+
+    # Optional fields with defaults
+    canonical_task: "CanonicalTask | None" = None  # Normalized intent for frame deduplication
+    branched_from: str | None = None     # If pivot: which frame this branched from
+    escalation_reason: str | None = None # Why this frame was escalated/suspended
+    completed_at: datetime | None = None
 
 
 def compute_frame_id(
@@ -71,8 +74,35 @@ def compute_frame_id(
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
-def generate_invalidation_condition(context_slice: "ContextSlice") -> str:
-    """Generate default invalidation condition from context_slice."""
+def generate_invalidation_condition(context_slice: "ContextSlice") -> dict:
+    """
+    Generate structured invalidation condition from context_slice.
+
+    Returns a dict that can be programmatically checked, not just a string.
+
+    Structure:
+    {
+        "files": ["/path/to/file1.py", ...],
+        "tools": ["Read", "Glob", ...],
+        "memory_refs": ["ref1", ...],
+        "description": "Human-readable summary"
+    }
+    """
+    files = list(context_slice.files.keys()) if context_slice.files else []
+    tools = list(context_slice.tool_outputs.keys()) if context_slice.tool_outputs else []
+    memory_refs = list(context_slice.memory_refs) if context_slice.memory_refs else []
+    description = _generate_description(context_slice)
+
+    return {
+        "files": files,
+        "tools": tools,
+        "memory_refs": memory_refs,
+        "description": description,
+    }
+
+
+def _generate_description(context_slice: "ContextSlice") -> str:
+    """Generate human-readable description for debugging."""
     parts = []
 
     if context_slice.files:
@@ -89,7 +119,7 @@ def generate_invalidation_condition(context_slice: "ContextSlice") -> str:
         parts.append(f"tool results from {', '.join(tool_names)} change")
 
     if context_slice.memory_refs:
-        parts.append(f"memory entries change")
+        parts.append("memory entries change")
 
     if not parts:
         return "No automatic invalidation condition"

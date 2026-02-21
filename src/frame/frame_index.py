@@ -162,6 +162,7 @@ class FrameIndex:
                 "escalation_reason": frame.escalation_reason,
                 "created_at": frame.created_at.isoformat() if frame.created_at else None,
                 "completed_at": frame.completed_at.isoformat() if frame.completed_at else None,
+                "canonical_task": frame.canonical_task.to_dict() if frame.canonical_task else None,
             }
             frames_data.append(frame_dict)
 
@@ -193,6 +194,7 @@ class FrameIndex:
         """
         from .causal_frame import CausalFrame, FrameStatus
         from .context_slice import ContextSlice
+        from .canonical_task import CanonicalTask
 
         if base_dir is None:
             base_dir = Path.home() / ".claude" / "rlm-frames"
@@ -217,6 +219,11 @@ class FrameIndex:
                 token_budget=frame_dict["context_slice"]["token_budget"],
             )
 
+            # Load canonical_task if present
+            canonical_task = None
+            if frame_dict.get("canonical_task"):
+                canonical_task = CanonicalTask.from_dict(frame_dict["canonical_task"])
+
             frame = CausalFrame(
                 frame_id=frame_dict["frame_id"],
                 depth=frame_dict["depth"],
@@ -233,6 +240,7 @@ class FrameIndex:
                 escalation_reason=frame_dict.get("escalation_reason"),
                 created_at=datetime.fromisoformat(frame_dict["created_at"]) if frame_dict.get("created_at") else None,
                 completed_at=datetime.fromisoformat(frame_dict["completed_at"]) if frame_dict.get("completed_at") else None,
+                canonical_task=canonical_task,
             )
             index.add(frame)
 
