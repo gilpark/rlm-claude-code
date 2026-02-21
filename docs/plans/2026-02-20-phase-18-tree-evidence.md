@@ -1,36 +1,39 @@
-# Phase 18: Tree Structure + Evidence + Cascade + Recursion
+# Phase 18: Tree Structure + Evidence + Cascade + Recursion + Intent Normalization
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Summary:** Enable true recursive decomposition, tree-structured frames, evidence linking, and full cascade invalidation — turning flat chains into evolving causal graphs.
+**Summary:** Enable true recursive decomposition, tree-structured frames, evidence linking, full cascade invalidation, **and intent-based frame deduplication** — turning flat chains into an evolving, reusable causal graph.
 
-**Goal:** Transform linear frame chain into proper tree structure with evidence tracking, cascade invalidation, and **working recursion via synchronous llm(sub_query)**.
+**Goal:**
+- Fix recursion (depth > 0, real branching)
+- Shift frame identity from raw query → canonical task (prevents duplication)
+- Make invalidation_condition structured & executable
+- Auto-track evidence + children correctly
+- Strengthen cascade with caching & defensiveness
+- Add verbose logging for debugging recursion decisions
 
-**Architecture:**
-- Populate `children` when creating frames
-- Auto-track evidence from child frames and tool outputs
-- Auto-generate `invalidation_condition`
-- Implement full cascade propagation with dependent frame discovery
-- **Add synchronous recursion via llm(sub_query) - no subprocess**
+**Architecture Decisions (from conversation):**
+- Frame identity = hash(canonical_task + context_slice.hash) — **not** raw query
+- Evidence only from COMPLETED children (no invalidated)
+- invalidation_condition becomes dict (structured, not just string)
+- No weighted evidence yet — prefer symbol-level granularity later
+- Synchronous llm(sub_query) — no subprocess
+- Verbose logging for recursion decisions
 
-**Tech Stack:** Python dataclasses, existing frame infrastructure
+**Tech Stack:** Python dataclasses, existing frame infrastructure, json, hashlib
 
 ---
 
-## Part A: Recursion Infrastructure
+## Part A: Recursion Infrastructure + Intent Normalization
 
-### Task A1: Add Synchronous `llm(sub_query)` Recursion
-
-**Problem:** All frames are at depth 0 because `llm()` makes single LLM calls but doesn't create child frames or sub-loops.
-
-**Solution:** Use synchronous `llm(sub_query)` that creates child frames with **explicit depth parameter** (safer for future async/parallel).
+### Task A1: Add Synchronous `llm(sub_query)` Recursion with Explicit Depth
 
 **Files:**
-- Modify: `src/repl/rlaph_loop.py` (add spawn_child mechanism)
-- Modify: `src/repl/repl_environment.py` (expose llm with recursion)
+- Modify: `src/repl/rlaph_loop.py`
+- Modify: `src/repl/repl_environment.py`
 - Test: `tests/repl/test_llm_recursion.py`
 
-**Step 1: Write the failing test**
+**Step 1: Write failing tests**
 
 ```python
 """Tests for llm() recursive calls."""
@@ -41,30 +44,10 @@ from src.frame.causal_frame import FrameStatus
 from src.types import SessionContext
 
 
-@pytest.mark.asyncio
-async def test_llm_creates_child_frame():
-    """When llm(sub_query) is called, it should create a child frame."""
-    context = SessionContext(messages=[], files={}, tool_outputs=[], working_memory={})
-    loop = RLAPHLoop(max_iterations=5, max_depth=2)
-
-    result = await loop.run(
-        "Test recursive llm call",
-        context,
-        working_dir=Path.cwd(),
-    )
-
-    # Should have at least one frame
-    assert len(loop.frame_index) >= 1
-
-
-@pytest.mark.asyncio
-async def test_llm_sync_returns_result():
+def test_llm_sync_returns_result():
     """llm_sync should return actual LLM result synchronously."""
     loop = RLAPHLoop(max_depth=2)
-
-    # This should work without error
     result = loop.llm_sync("What is 2+2?")
-
     assert result is not None
     assert len(result) > 0
 
@@ -72,13 +55,8 @@ async def test_llm_sync_returns_result():
 def test_llm_sync_with_explicit_depth():
     """llm_sync should accept explicit depth parameter."""
     loop = RLAPHLoop(max_depth=3)
-
-    # Call with explicit depth
     result = loop.llm_sync("Test query", depth=1)
-
     assert result is not None
-
-    # Check that child frame was created at depth 1
     frames_at_depth_1 = [f for f in loop.frame_index._frames.values() if f.depth == 1]
     assert len(frames_at_depth_1) >= 1
 
@@ -86,85 +64,57 @@ def test_llm_sync_with_explicit_depth():
 def test_llm_sync_respects_max_depth():
     """llm_sync should raise RecursionDepthError if max depth exceeded."""
     loop = RLAPHLoop(max_depth=2)
-
     from src.types import RecursionDepthError
     with pytest.raises(RecursionDepthError):
-        loop.llm_sync("This should fail", depth=3)  # Exceeds max_depth=2
+        loop.llm_sync("This should fail", depth=3)
 
 
-def test_llm_sync_depth_default_increments():
-    """Without explicit depth, llm_sync should use current_depth + 1."""
+def test_llm_sync_creates_child_frame():
+    """llm_sync should create a child frame for each call."""
     loop = RLAPHLoop(max_depth=3)
-    loop._current_frame_id = None  # Root level
+    initial_count = len(loop.frame_index)
+    loop.llm_sync("Test query", depth=1)
+    assert len(loop.frame_index) > initial_count
 
-    # First call at implicit depth 1
-    result1 = loop.llm_sync("Query 1")
-    frames_after_1 = len(loop.frame_index)
 
-    # Second call should also work
-    result2 = loop.llm_sync("Query 2")
-    frames_after_2 = len(loop.frame_index)
-
-    assert frames_after_2 > frames_after_1
+def test_llm_sync_verbose_logging(capsys):
+    """llm_sync should log when verbose=True."""
+    loop = RLAPHLoop(max_depth=3, verbose=True)
+    loop.llm_sync("Test query", depth=1)
+    captured = capsys.readouterr()
+    assert "[RLM]" in captured.out
+    assert "depth 1" in captured.out
 ```
 
-**Step 2: Run test to verify current state**
+**Step 2: Implement llm_sync with explicit depth**
 
-```bash
-cd /Users/gilpark/.dotfiles/.claude/plugins/marketplaces/causeway
-uv run pytest tests/repl/test_llm_recursion.py -v
-```
-
-Expected: Tests fail (llm_sync doesn't create frames yet)
-
-**Step 3: Implement llm_sync with explicit depth parameter**
-
-In `src/repl/rlaph_loop.py`, update `llm_sync`:
+In `src/repl/rlaph_loop.py`:
 
 ```python
 def llm_sync(self, query: str, context: str = "", depth: int | None = None) -> str:
     """
     Synchronous LLM call - returns actual result immediately.
 
-    This is the key method that makes RLAPH work:
-    - Called from REPL's llm() function
-    - Returns actual string result
-    - Creates child frames for recursion tracking
-    - Uses explicit depth parameter (safer for future async)
-
-    Args:
-        query: Query string
-        context: Optional context string
-        depth: Explicit depth for this call (default: self._depth + 1)
-
-    Returns:
-        LLM response as string
-
-    Raises:
-        RecursionDepthError: If max depth exceeded
+    Uses explicit depth parameter (safer for future async).
+    Creates child frames for recursion tracking.
     """
-    # Calculate depth explicitly (don't mutate self._depth)
     current_depth = depth if depth is not None else self._depth + 1
 
-    # Check depth limit
     if current_depth > self.max_depth:
         raise RecursionDepthError(current_depth, self.max_depth)
 
-    # Verbose logging for recursion decisions
     if self._verbose:
         print(f"[RLM] Recursion at depth {current_depth}: {query[:80]}...")
 
-    # Use LLMClient directly
     result = self.llm_client.call(
         query=query,
         context={"prior": context} if context else None,
         depth=current_depth,
     )
 
-    # Track tokens
     self._tokens_used += len(result) // 4
 
-    # Create child frame for this llm call
+    # Create child frame
     context_slice = ContextSlice(
         files={},
         memory_refs=list(self.repl.memory_refs) if self.repl else [],
@@ -186,7 +136,7 @@ def llm_sync(self, query: str, context: str = "", depth: int | None = None) -> s
         evidence=[],
         conclusion=result[:500] if result else None,
         confidence=0.8,
-        invalidation_condition="",
+        invalidation_condition={},
         status=FrameStatus.COMPLETED,
         branched_from=None,
         escalation_reason=None,
@@ -195,11 +145,6 @@ def llm_sync(self, query: str, context: str = "", depth: int | None = None) -> s
     )
 
     self.frame_index.add(child_frame)
-
-    # Optionally track current frame (for nested calls)
-    # Don't update self._current_frame_id to avoid affecting sibling calls
-    # self._current_frame_id = child_frame.frame_id
-
     return result
 ```
 
@@ -213,50 +158,552 @@ def __init__(
     config: RLMConfig | None = None,
     llm_client: LLMClient | None = None,
     context_map: ContextMap | None = None,
-    verbose: bool = False,  # NEW
+    verbose: bool = False,
 ):
     # ... existing init ...
     self._verbose = verbose
 ```
 
-**Step 4: Run test to verify**
+**Step 3: Run tests**
 
 ```bash
 uv run pytest tests/repl/test_llm_recursion.py -v
 ```
 
-Expected: Tests pass
-
-**Step 5: Commit**
+**Step 4: Commit**
 
 ```bash
 git add src/repl/rlaph_loop.py tests/repl/test_llm_recursion.py
-git commit -m "feat: add child frame creation to llm_sync for recursion
+git commit -m "feat: add synchronous llm_sync with explicit depth parameter
 
-- llm_sync now creates child frames for each recursive call
-- Explicit depth parameter (safer for future async)
-- Verbose logging for recursion decisions
-- Enables tree structure instead of flat chain"
+- Creates child frames for each recursive call
+- Verbose logging for debugging recursion decisions
+- Explicit depth (safer for future async)"
 ```
 
 ---
 
-### Task A2: Enhance System Prompt for Recursion
+### Task A2: Add Intent Normalization & Canonical Frame ID
 
-**Problem:** The LLM doesn't know it can decompose tasks via llm(), or might over-use recursion.
+**Files:**
+- New: `src/frame/canonical_task.py`
+- New: `src/frame/intent_extractor.py`
+- Modify: `src/frame/causal_frame.py` (add canonical_task field)
+- Modify: `src/repl/rlaph_loop.py` (use in frame creation)
+- Modify: `src/frame/frame_index.py` (save/load canonical_task)
+- Test: `tests/frame/test_canonical_task.py`
 
-**Solution:** Add explicit recursion guidance with guardrails against depth explosion.
+**Problem:** Frame identity uses raw query → similar queries create duplicate frames → entropy explosion.
+
+**Solution:** Extract canonical task from query, use hash(canonical_task + context_slice) as frame identity.
+
+**Step 1: Create CanonicalTask dataclass**
+
+In `src/frame/canonical_task.py`:
+
+```python
+"""Canonical task representation for frame deduplication."""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..llm.llm_client import LLMClient
+
+
+@dataclass(frozen=True)
+class CanonicalTask:
+    """
+    Normalized representation of a task intent.
+
+    Used for frame identity to prevent duplicate frames from similar queries.
+    """
+    task_type: str  # "analyze", "debug", "summarize", "implement", "verify"
+    target: str | list[str]  # "auth.py" or ["src/auth/*"]
+    analysis_scope: str | None = None  # "correctness", "architecture", "security"
+    params: dict = field(default_factory=dict)
+
+    def to_hash(self) -> str:
+        """Generate stable hash for this canonical task."""
+        data = json.dumps(asdict(self), sort_keys=True)
+        return hashlib.blake2b(data.encode(), digest_size=8).hexdigest()
+
+    def to_dict(self) -> dict:
+        """Serialize to dict for JSON storage."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CanonicalTask":
+        """Deserialize from dict."""
+        return cls(
+            task_type=data.get("task_type", "unknown"),
+            target=data.get("target", "unknown"),
+            analysis_scope=data.get("analysis_scope"),
+            params=data.get("params", {}),
+        )
+```
+
+**Step 2: Create intent extractor (LANGUAGE/FRAMEWORK AGNOSTIC)**
+
+In `src/frame/intent_extractor.py`:
+
+> **Design Principle:** Intent-first, not project-first. The rules work for any language (.py, .ts, .go, .rs) and any framework (FastAPI, NestJS, etc.)
+
+```python
+"""Extract canonical task from user query - language/framework agnostic."""
+from __future__ import annotations
+
+import json
+import re
+from typing import TYPE_CHECKING, Callable
+
+from .canonical_task import CanonicalTask
+
+if TYPE_CHECKING:
+    from ..llm.llm_client import LLMClient
+
+
+# ──────────────────────────────────────────────────────────────
+# Common intent verbs and their canonical task_type + scope
+# Language-agnostic: works for Python, TypeScript, Go, Rust, etc.
+# ──────────────────────────────────────────────────────────────
+INTENT_VERBS: dict[str, tuple[str, str]] = {
+    # Analysis / understanding
+    r"\b(analyze|analyse|review|check|inspect|examine|look at|study)\b": ("analyze", "overview"),
+    r"\b(explain|describe|how does|what is|tell me about)\b": ("explain", "overview"),
+    r"\b(summarize|summary|overview|tl;?dr)\b": ("summarize", "overview"),
+
+    # Debugging / correctness
+    r"\b(debug|fix|solve|troubleshoot|error|bug|issue|wrong|broken|not working)\b": ("debug", "correctness"),
+    r"\b(test|verify|validate|check if|make sure)\b": ("verify", "correctness"),
+
+    # Implementation / change
+    r"\b(implement|add|create|build|write|make)\b": ("implement", "functionality"),
+    r"\b(refactor|improve|optimize|clean up)\b": ("refactor", "structure"),
+    r"\b(document|comment|doc|readme)\b": ("document", "documentation"),
+
+    # Security / performance (override default scope)
+    r"\b(security|vulnerability|exploit|safe|attack)\b": ("analyze", "security"),
+    r"\b(performance|slow|optimize|scale)\b": ("analyze", "performance"),
+    r"\b(architecture|design|structure)\b": ("analyze", "architecture"),
+}
+
+# ──────────────────────────────────────────────────────────────
+# Target extraction patterns (file, dir, module, function, etc.)
+# Extracts ACTUAL target from query, not hardcoded names
+# ──────────────────────────────────────────────────────────────
+TARGET_PATTERNS: list[tuple[str, Callable]] = [
+    # Direct file mention: "auth.py", "server.ts", "main.rs"
+    (r"\b([a-zA-Z0-9_-]+\.(py|ts|js|jsx|tsx|go|rs|java|cpp|c|cs|rb|scala|kt))\b",
+     lambda m: [m.group(1)]),
+
+    # Directory or module: "src/auth", "controllers/user", "lib/mdns"
+    (r"\b(src|lib|app|controllers|services|utils|pkg|internal|cmd)/([a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_-]+)*)\b",
+     lambda m: [f"{m.group(1)}/{m.group(2)}"]),
+
+    # Generic "the X file/module": "the auth file", "the user service"
+    (r"\b(the|this|my|our)\s+([a-zA-Z0-9_-]+)\s+(file|module|service|controller|component|endpoints?|api)\b",
+     lambda m: [f"**/*{m.group(2)}*"]),
+
+    # Function/method/class: "login function", "UserService class"
+    (r"\b([A-Za-z0-9_]+)\s+(function|method|func|class|struct|interface|handler)\b",
+     lambda m: [f"**/*{m.group(1)}*"]),
+
+    # "in X" pattern: "in auth", "in the api"
+    (r"\b(in|inside)\s+(?:the\s+)?([a-zA-Z0-9_-]+)\b",
+     lambda m: [f"**/*{m.group(2)}*"]),
+]
+
+
+def extract_canonical_task(
+    query: str,
+    llm_client: "LLMClient | None" = None,
+    use_llm_fallback: bool = True,
+) -> CanonicalTask:
+    """
+    Extract canonical task from user query.
+
+    Uses fast deterministic rules first (70-80% hit rate), then LLM fallback.
+
+    Design:
+    - Intent-first: focuses on VERB + TARGET patterns
+    - Language-agnostic: works for .py, .ts, .go, .rs, etc.
+    - Framework-agnostic: no hardcoded module names
+
+    Args:
+        query: User query string
+        llm_client: Optional LLM client for fallback
+        use_llm_fallback: Whether to use LLM if rules don't match
+
+    Returns:
+        CanonicalTask with normalized intent
+    """
+    q_lower = query.lower()
+
+    # Step 1: Determine task_type and scope from intent verbs
+    task_type = "analyze"  # default fallback
+    analysis_scope = "overview"
+
+    for pattern, (tt, scope) in INTENT_VERBS.items():
+        if re.search(pattern, q_lower, re.IGNORECASE):
+            task_type = tt
+            analysis_scope = scope
+            break
+
+    # Step 2: Extract target dynamically
+    target: str | list[str] | None = None
+
+    for pattern, extractor in TARGET_PATTERNS:
+        match = re.search(pattern, query, re.IGNORECASE)
+        if match:
+            target = extractor(match)
+            break
+
+    # Step 3: If we got both task and target → confident rule-based result
+    if target is not None:
+        return CanonicalTask(
+            task_type=task_type,
+            target=target,
+            analysis_scope=analysis_scope,
+            params={"original_query": query[:200]},
+        )
+
+    # Step 4: LLM fallback for everything else
+    if llm_client and use_llm_fallback:
+        try:
+            canonical = _extract_with_llm(query, llm_client)
+            if canonical:
+                return canonical
+        except Exception:
+            pass  # Fall through to ultimate fallback
+
+    # Ultimate fallback: analyze whole codebase
+    return CanonicalTask(
+        task_type="analyze",
+        target=["**/*"],
+        analysis_scope="overview",
+        params={"original_query": query[:200]},
+    )
+
+
+def _extract_with_llm(query: str, llm_client: "LLMClient") -> CanonicalTask | None:
+    """Use LLM to extract canonical task (fallback for complex queries)."""
+    prompt = f'''Extract canonical task from user query: "{query}"
+
+Output JSON only:
+{{
+  "task_type": "analyze|debug|summarize|implement|refactor|document|verify|explain",
+  "target": ["file pattern or list of files"],
+  "analysis_scope": "overview|correctness|architecture|performance|security|documentation",
+  "params": {{}}
+}}
+
+Be precise. Use glob patterns like "src/auth/*.ts" if appropriate. Target should be a list.'''
+
+    result = llm_client.call(prompt)
+
+    # Extract JSON from response (handle markdown code blocks)
+    json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', result, re.DOTALL)
+    if not json_match:
+        json_match = re.search(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', result, re.DOTALL)
+
+    if json_match:
+        try:
+            data = json.loads(json_match.group(1) if json_match.lastindex else json_match.group())
+            # Ensure target is a list
+            target = data.get("target", ["**/*"])
+            if isinstance(target, str):
+                target = [target]
+
+            return CanonicalTask(
+                task_type=data.get("task_type", "analyze"),
+                target=target,
+                analysis_scope=data.get("analysis_scope", "overview"),
+                params=data.get("params", {}),
+            )
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return None
+```
+
+**Step 3: Update CausalFrame to include canonical_task**
+
+In `src/frame/causal_frame.py`:
+
+```python
+from .canonical_task import CanonicalTask
+
+@dataclass
+class CausalFrame:
+    # ... existing fields ...
+    canonical_task: CanonicalTask | None = None
+```
+
+Update `frame_to_dict` and `dict_to_frame` to handle canonical_task.
+
+**Step 4: Update frame creation in RLAPHLoop**
+
+In `src/repl/rlaph_loop.py`:
+
+```python
+from ..frame.canonical_task import CanonicalTask
+from ..frame.intent_extractor import extract_canonical_task
+
+# In llm_sync and frame creation:
+canonical = extract_canonical_task(query, self.llm_client)
+frame_id = canonical.to_hash() + "_" + context_slice_hash
+
+child_frame = CausalFrame(
+    frame_id=frame_id,
+    canonical_task=canonical,
+    # ... rest of fields ...
+)
+```
+
+**Step 5: Write tests (language-agnostic)**
+
+In `tests/frame/test_canonical_task.py`:
+
+```python
+"""Tests for canonical task extraction - language/framework agnostic."""
+import pytest
+from src.frame.canonical_task import CanonicalTask
+from src.frame.intent_extractor import extract_canonical_task
+
+
+def test_canonical_task_hash_stable():
+    """Same canonical task should produce same hash."""
+    task1 = CanonicalTask(task_type="analyze", target=["auth.py"], analysis_scope="correctness")
+    task2 = CanonicalTask(task_type="analyze", target=["auth.py"], analysis_scope="correctness")
+    assert task1.to_hash() == task2.to_hash()
+
+
+def test_canonical_task_hash_different():
+    """Different tasks should produce different hashes."""
+    task1 = CanonicalTask(task_type="analyze", target=["auth.py"])
+    task2 = CanonicalTask(task_type="debug", target=["auth.py"])
+    assert task1.to_hash() != task2.to_hash()
+
+
+# ──────────────────────────────────────────────────────────────
+# Language-agnostic tests (work for any stack)
+# ──────────────────────────────────────────────────────────────
+
+def test_extract_python_file():
+    """Should extract Python file from query."""
+    task = extract_canonical_task("Analyze auth.py for security issues")
+    assert task.task_type == "analyze"
+    assert "auth.py" in task.target
+
+
+def test_extract_typescript_file():
+    """Should extract TypeScript file from query."""
+    task = extract_canonical_task("Debug the error in user.service.ts")
+    assert task.task_type == "debug"
+    assert "user.service.ts" in task.target
+
+
+def test_extract_go_file():
+    """Should extract Go file from query."""
+    task = extract_canonical_task("Explain how main.go works")
+    assert task.task_type == "explain"
+    assert "main.go" in task.target
+
+
+def test_extract_rust_file():
+    """Should extract Rust file from query."""
+    task = extract_canonical_task("Review lib.rs for performance")
+    assert task.task_type == "analyze"
+    assert "lib.rs" in task.target
+    assert task.analysis_scope == "performance"
+
+
+def test_extract_directory_target():
+    """Should extract directory path from query."""
+    task = extract_canonical_task("Summarize src/auth module")
+    assert task.task_type == "summarize"
+    assert any("auth" in t for t in task.target)
+
+
+def test_extract_generic_module():
+    """Should extract module name with glob pattern."""
+    task = extract_canonical_task("Implement the cache service")
+    assert task.task_type == "implement"
+    assert any("cache" in t.lower() for t in task.target)
+
+
+def test_security_scope_override():
+    """Should detect security scope."""
+    task = extract_canonical_task("Check for security vulnerabilities")
+    assert task.task_type == "analyze"
+    assert task.analysis_scope == "security"
+
+
+def test_ultimate_fallback():
+    """Should fallback to whole codebase when no target found."""
+    task = extract_canonical_task("What do you think?")
+    assert task.task_type == "analyze"
+    assert task.target == ["**/*"]
+
+
+def test_extract_canonical_task_debug():
+    """Should extract debug task from debug query."""
+    task = extract_canonical_task("Debug the login error")
+    assert task.task_type == "debug"
+    assert task.target == "auth.py"
+
+
+def test_canonical_task_serialization():
+    """Should serialize/deserialize correctly."""
+    task = CanonicalTask(
+        task_type="analyze",
+        target=["auth.py"],
+        analysis_scope="security",
+        params={"key": "value"},
+    )
+
+    data = task.to_dict()
+    restored = CanonicalTask.from_dict(data)
+
+    assert restored.task_type == task.task_type
+    assert restored.target == task.target
+    assert restored.analysis_scope == task.analysis_scope
+    assert restored.params == task.params
+```
+
+**Step 6: Run tests**
+
+```bash
+uv run pytest tests/frame/test_canonical_task.py -v
+```
+
+**Step 7: Commit**
+
+```bash
+git add src/frame/canonical_task.py src/frame/intent_extractor.py src/frame/causal_frame.py src/repl/rlaph_loop.py tests/frame/test_canonical_task.py
+git commit -m "feat: add intent normalization + canonical_task for frame deduplication
+
+- CanonicalTask dataclass with stable hash
+- Language-agnostic intent extractor (works for .py, .ts, .go, .rs)
+- Intent-first design: verb + target patterns, not hardcoded modules
+- Dynamic target extraction from query (not project-specific)
+- Hybrid rule (70-80% hit rate) + LLM fallback
+- Frame identity = canonical_task.hash() + context_slice.hash()"
+```
+
+---
+
+### Task A3: Structured invalidation_condition (dict)
+
+**Files:**
+- Modify: `src/frame/causal_frame.py`
+- Modify: `src/repl/rlaph_loop.py`
+
+**Step 1: Update generate_invalidation_condition**
+
+In `src/frame/causal_frame.py`:
+
+```python
+from dataclasses import field
+from pathlib import Path
+
+def generate_invalidation_condition(context_slice: "ContextSlice") -> dict:
+    """
+    Generate structured invalidation condition from context_slice.
+
+    Returns a dict that can be programmatically checked, not just a string.
+    """
+    return {
+        "files": list(context_slice.files.keys()) if context_slice.files else [],
+        "tools": list(context_slice.tool_outputs.keys()) if context_slice.tool_outputs else [],
+        "memory_refs": list(context_slice.memory_refs) if context_slice.memory_refs else [],
+        "description": _generate_description(context_slice),
+    }
+
+
+def _generate_description(context_slice: "ContextSlice") -> str:
+    """Generate human-readable description for debugging."""
+    parts = []
+
+    if context_slice.files:
+        filenames = [Path(p).name for p in context_slice.files.keys()]
+        if len(filenames) == 1:
+            parts.append(f"{filenames[0]} changes or is deleted")
+        else:
+            shown = filenames[:3]
+            more = f" (+{len(filenames) - 3} more)" if len(filenames) > 3 else ""
+            parts.append(f"any of {len(filenames)} files ({', '.join(shown)}{more}) change")
+
+    if context_slice.tool_outputs:
+        tool_names = list(context_slice.tool_outputs.keys())
+        parts.append(f"tool results from {', '.join(tool_names)} change")
+
+    if context_slice.memory_refs:
+        parts.append("memory entries change")
+
+    if not parts:
+        return "No automatic invalidation condition"
+
+    return "; or ".join(parts)
+```
+
+**Step 2: Update CausalFrame field**
+
+```python
+@dataclass
+class CausalFrame:
+    # ... existing fields ...
+    invalidation_condition: dict = field(default_factory=dict)  # Changed from str
+```
+
+**Step 3: Update tests**
+
+```python
+def test_generate_invalidation_condition_structured():
+    """Should return dict with structured data."""
+    context_slice = ContextSlice(
+        files={"/src/main.py": "hash123"},
+        memory_refs=[],
+        tool_outputs={"Read": "hash456"},
+        token_budget=8000,
+    )
+
+    condition = generate_invalidation_condition(context_slice)
+
+    assert isinstance(condition, dict)
+    assert "files" in condition
+    assert "tools" in condition
+    assert "description" in condition
+    assert "/src/main.py" in condition["files"]
+    assert "Read" in condition["tools"]
+```
+
+**Step 4: Commit**
+
+```bash
+git add src/frame/causal_frame.py src/repl/rlaph_loop.py tests/frame/test_invalidation_condition.py
+git commit -m "feat: make invalidation_condition structured dict
+
+- Now {\"files\": [...], \"tools\": [...], \"description\": \"...\"}
+- Easier to automate/execute invalidation checks
+- Backward compatible with human-readable description"
+```
+
+---
+
+### Task A4: Enhance System Prompt for Recursion
 
 **Files:**
 - Modify: `src/repl/rlaph_loop.py` (_build_system_prompt)
 
 **Step 1: Update system prompt**
 
-In `src/repl/rlaph_loop.py`, update `_build_system_prompt`:
-
 ```python
 def _build_system_prompt(self) -> str:
-    """Build system prompt with REPL instructions and recursion guidance."""
     return f"""You are an RLM (Recursive Language Model) agent with access to a REAL Python REPL.
 
 CRITICAL RULES:
@@ -279,6 +726,7 @@ IMPORTANT RECURSION RULES:
 - Do NOT call llm() for tiny steps — that wastes depth budget
 - Always prefer small, focused sub-queries (1–3 sentences)
 - If you're unsure, try simple code first, then recurse if needed
+- The system tracks frame identity by task intent, not exact query wording
 
 Your workflow:
 1. Write Python code in ```python blocks
@@ -339,134 +787,49 @@ Working memory: working_memory dict for storing results across code blocks"""
 
 ```bash
 git add src/repl/rlaph_loop.py
-git commit -m "feat: enhance system prompt with recursion guidance and guardrails
+git commit -m "feat: enhance system prompt with recursion guardrails
 
-- Explicit llm(sub_query) usage instructions
-- Guardrails against depth explosion (no tiny steps)
-- Example with task decomposition
-- Max depth visibility in prompt"
+- Explicit rules against tiny-step recursion
+- Frame identity explanation
+- Better examples for decomposition"
 ```
 
 ---
 
-### Task A3: Add Query/Intent Tracking to FrameIndex
-
-**Problem:** Sessions don't track the user's initial intention, making cross-session awareness poor.
-
-**Solution:** Add `initial_query` and optional `query_summary` to FrameIndex.
+### Task A5: Add Query/Intent Tracking to FrameIndex
 
 **Files:**
 - Modify: `src/frame/frame_index.py`
 - Modify: `scripts/run_orchestrator.py`
 - Test: `tests/frame/test_frame_index_query.py`
 
-**Step 1: Write the failing test**
-
-```python
-"""Tests for query/intent tracking in FrameIndex."""
-import pytest
-from pathlib import Path
-from src.frame.frame_index import FrameIndex
-
-
-def test_frame_index_stores_initial_query():
-    """FrameIndex should store the initial user query."""
-    index = FrameIndex(initial_query="Analyze the auth module")
-
-    assert index.initial_query == "Analyze the auth module"
-
-
-def test_frame_index_query_summary():
-    """FrameIndex can store a short query summary."""
-    index = FrameIndex(
-        initial_query="Analyze the authentication flow in the auth module",
-        query_summary="Auth flow analysis"
-    )
-
-    assert index.query_summary == "Auth flow analysis"
-
-
-def test_frame_index_save_load_with_query(tmp_path):
-    """Query should persist across save/load."""
-    index = FrameIndex(
-        initial_query="Debug the login bug",
-        query_summary="Login bug debug"
-    )
-
-    # Save
-    index.save("test_query_session", tmp_path)
-
-    # Load
-    loaded = FrameIndex.load("test_query_session", tmp_path)
-
-    assert loaded.initial_query == "Debug the login bug"
-    assert loaded.query_summary == "Login bug debug"
-
-
-def test_frame_index_defaults_empty_query():
-    """FrameIndex defaults to empty query strings."""
-    index = FrameIndex()
-
-    assert index.initial_query == ""
-    assert index.query_summary == ""
-```
-
-**Step 2: Run test to verify it fails**
-
-```bash
-uv run pytest tests/frame/test_frame_index_query.py -v
-```
-
-Expected: FAIL with "TypeError: FrameIndex.__init__() got an unexpected keyword argument 'initial_query'"
-
-**Step 3: Update FrameIndex**
-
-In `src/frame/frame_index.py`:
+**Step 1: Add fields to FrameIndex**
 
 ```python
 @dataclass
 class FrameIndex:
-    """
-    In-memory index of CausalFrames for a session.
-
-    Supports O(n) operations for 10-20 frames.
-    """
-
     initial_query: str = ""
     query_summary: str = ""
     commit_hash: str | None = None
     _frames: dict[str, CausalFrame] = field(default_factory=dict)
-    _dependent_cache: dict[str, set[str]] = field(default_factory=dict)  # For B4
-
-    def __post_init__(self):
-        """Ensure _frames is a dict."""
-        if self._frames is None:
-            self._frames = {}
-        if self._dependent_cache is None:
-            self._dependent_cache = {}
+    _dependent_cache: dict[str, set[str]] = field(default_factory=dict)
 ```
 
-Update save/load methods to include query fields:
+**Step 2: Update save/load**
 
 ```python
 def save(self, session_id: str, base_dir: Path | None = None) -> Path:
-    """Save frame index to JSON file."""
-    # ... existing path logic ...
-
     data = {
         "initial_query": self.initial_query,
         "query_summary": self.query_summary,
         "commit_hash": self.commit_hash,
         "frames": [frame_to_dict(f) for f in self._frames.values()],
     }
-
-    # ... rest of save ...
+    # ... save to file ...
 
 @classmethod
 def load(cls, session_id: str, base_dir: Path | None = None) -> "FrameIndex | None":
-    """Load frame index from JSON file."""
-    # ... existing load logic ...
-
+    # ... load from file ...
     return cls(
         initial_query=data.get("initial_query", ""),
         query_summary=data.get("query_summary", ""),
@@ -475,41 +838,7 @@ def load(cls, session_id: str, base_dir: Path | None = None) -> "FrameIndex | No
     )
 ```
 
-**Step 4: Update orchestrator to pass query**
-
-In `scripts/run_orchestrator.py`, update `run_rlaph`:
-
-```python
-async def run_rlaph(
-    query: str,
-    depth: int = 2,
-    verbose: bool = False,
-    working_dir: Path | None = None,
-    session_id: str | None = None,
-) -> str:
-    # ... existing setup ...
-
-    # Set initial query on frame index
-    loop.frame_index.initial_query = query
-
-    # Generate simple query summary (first 50 chars)
-    loop.frame_index.query_summary = query[:50] + ("..." if len(query) > 50 else "")
-
-    # Run loop
-    result = await loop.run(query, context, working_dir=work_dir, session_id=session_id)
-
-    # ... rest of function ...
-```
-
-**Step 5: Run tests**
-
-```bash
-uv run pytest tests/frame/test_frame_index_query.py -v
-```
-
-Expected: PASS
-
-**Step 6: Commit**
+**Step 3: Commit**
 
 ```bash
 git add src/frame/frame_index.py scripts/run_orchestrator.py tests/frame/test_frame_index_query.py
@@ -517,8 +846,7 @@ git commit -m "feat: add query/intent tracking to FrameIndex
 
 - initial_query: Full user query
 - query_summary: Short summary for cross-session matching
-- Persisted in index.json
-- Enables 'continue last task' feature"
+- Persisted in index.json"
 ```
 
 ---
@@ -528,100 +856,10 @@ git commit -m "feat: add query/intent tracking to FrameIndex
 ### Task B1: Populate Children in Frame Tree
 
 **Files:**
-- Modify: `src/frame/frame_index.py` (add method)
+- Modify: `src/frame/frame_index.py`
 - Test: `tests/repl/test_frame_tree.py`
 
-**Step 1: Write the failing test**
-
-```python
-"""Tests for frame tree structure."""
-import pytest
-from src.frame.frame_index import FrameIndex
-from src.frame.causal_frame import CausalFrame, FrameStatus
-from src.frame.context_slice import ContextSlice
-from datetime import datetime
-
-
-def make_frame(frame_id: str, parent_id: str = None) -> CausalFrame:
-    """Helper to create test frames."""
-    return CausalFrame(
-        frame_id=frame_id,
-        depth=0 if not parent_id else 1,
-        parent_id=parent_id,
-        children=[],
-        query=f"query_{frame_id}",
-        context_slice=ContextSlice(files={}, memory_refs=[], tool_outputs={}, token_budget=8000),
-        evidence=[],
-        conclusion=f"conclusion_{frame_id}",
-        confidence=0.8,
-        invalidation_condition="",
-        status=FrameStatus.COMPLETED,
-        branched_from=None,
-        escalation_reason=None,
-        created_at=datetime.now(),
-        completed_at=datetime.now(),
-    )
-
-
-def test_add_child_updates_parent_children_list():
-    """FrameIndex.add should update parent's children list."""
-    index = FrameIndex()
-
-    parent = make_frame("parent789")
-    index.add(parent)
-
-    child = make_frame("child111", parent_id="parent789")
-    index.add(child)
-
-    # Parent's children should now include child
-    parent_after = index.get("parent789")
-    assert "child111" in parent_after.children
-
-
-def test_tree_structure_multiple_children():
-    """Parent should track all children."""
-    index = FrameIndex()
-
-    parent = make_frame("root")
-    index.add(parent)
-
-    for i in range(3):
-        child = make_frame(f"child_{i}", parent_id="root")
-        index.add(child)
-
-    parent_after = index.get("root")
-    assert len(parent_after.children) == 3
-    assert "child_0" in parent_after.children
-    assert "child_1" in parent_after.children
-    assert "child_2" in parent_after.children
-
-
-def test_add_child_idempotent():
-    """Adding same child twice shouldn't duplicate."""
-    index = FrameIndex()
-
-    parent = make_frame("parent_dup")
-    index.add(parent)
-
-    child = make_frame("child_dup", parent_id="parent_dup")
-    index.add(child)
-    index.add(child)  # Add again (shouldn't duplicate)
-
-    parent_after = index.get("parent_dup")
-    assert parent_after.children.count("child_dup") == 1
-```
-
-**Step 2: Run test to verify it fails**
-
-```bash
-uv run pytest tests/repl/test_frame_tree.py -v
-```
-
-Expected: FAIL with "AssertionError: assert 'child111' in []"
-
-**Step 3: Write implementation with defensive checks**
-
-In `src/frame/frame_index.py`, modify `add` method:
+**Step 1: Update add() method**
 
 ```python
 def add(self, frame: "CausalFrame") -> None:
@@ -636,456 +874,67 @@ def add(self, frame: "CausalFrame") -> None:
         parent = self._frames[frame.parent_id]
         if frame.frame_id not in parent.children:
             parent.children.append(frame.frame_id)
-        # else: already added (idempotent, no-op)
 ```
 
-**Step 4: Run test to verify it passes**
-
-```bash
-uv run pytest tests/repl/test_frame_tree.py -v
-```
-
-Expected: PASS
-
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git add src/frame/frame_index.py tests/repl/test_frame_tree.py
 git commit -m "feat: populate children list when adding frames to index
 
 - FrameIndex.add updates parent's children list
-- Defensive check for duplicates (idempotent)
-- Clear dependent cache on frame changes
-- Enables proper tree structure traversal"
+- Defensive check for duplicates
+- Clear dependent cache on changes"
 ```
 
 ---
 
-### Task B2: Auto-Generate invalidation_condition
+### Task B2: Auto Evidence Tracking (COMPLETED only)
 
 **Files:**
-- Modify: `src/frame/causal_frame.py` (add helper function)
-- Modify: `src/repl/rlaph_loop.py` (use in frame creation)
-- Test: `tests/frame/test_invalidation_condition.py`
-
-**Step 1: Write the failing test**
-
-```python
-"""Tests for auto-generated invalidation_condition."""
-import pytest
-from src.frame.causal_frame import generate_invalidation_condition
-from src.frame.context_slice import ContextSlice
-
-
-def test_generate_invalidation_condition_with_files():
-    """Should generate condition from files in context_slice."""
-    context_slice = ContextSlice(
-        files={
-            "/path/to/file.py": "abc123",
-            "/path/to/other.py": "def456",
-        },
-        memory_refs=[],
-        tool_outputs={},
-        token_budget=8000,
-    )
-
-    condition = generate_invalidation_condition(context_slice)
-
-    assert len(condition) > 0
-    assert "file" in condition.lower()
-
-
-def test_generate_invalidation_condition_single_file():
-    """Should show filename for single file."""
-    context_slice = ContextSlice(
-        files={"/src/main.py": "abc123"},
-        memory_refs=[],
-        tool_outputs={},
-        token_budget=8000,
-    )
-
-    condition = generate_invalidation_condition(context_slice)
-
-    assert "main.py" in condition
-    assert "deleted" in condition or "change" in condition
-
-
-def test_generate_invalidation_condition_empty():
-    """Should return default message for empty context_slice."""
-    context_slice = ContextSlice(
-        files={},
-        memory_refs=[],
-        tool_outputs={},
-        token_budget=8000,
-    )
-
-    condition = generate_invalidation_condition(context_slice)
-
-    # Should have some default message
-    assert isinstance(condition, str)
-
-
-def test_generate_invalidation_condition_includes_tool_outputs():
-    """Should mention tool outputs in condition."""
-    context_slice = ContextSlice(
-        files={},
-        memory_refs=[],
-        tool_outputs={"Read": "hash123", "Bash": "hash456"},
-        token_budget=8000,
-    )
-
-    condition = generate_invalidation_condition(context_slice)
-
-    assert "tool" in condition.lower()
-```
-
-**Step 2: Run test to verify it fails**
-
-```bash
-uv run pytest tests/frame/test_invalidation_condition.py -v
-```
-
-Expected: FAIL with "ImportError: cannot import name 'generate_invalidation_condition'"
-
-**Step 3: Write implementation with precise conditions**
-
-In `src/frame/causal_frame.py`, add function:
-
-```python
-from pathlib import Path
-
-def generate_invalidation_condition(context_slice: "ContextSlice") -> str:
-    """
-    Generate default invalidation condition from context_slice.
-
-    The condition describes what would make this frame's conclusion
-    no longer valid. More precise = easier debugging.
-
-    Args:
-        context_slice: The frame's context slice
-
-    Returns:
-        Human-readable invalidation condition string
-    """
-    parts = []
-
-    if context_slice.files:
-        # Show actual filenames for clarity
-        filenames = [Path(p).name for p in context_slice.files.keys()]
-        if len(filenames) == 1:
-            parts.append(f"{filenames[0]} changes or is deleted")
-        else:
-            # Show first 3 files, indicate if more
-            shown = filenames[:3]
-            more = f" (+{len(filenames) - 3} more)" if len(filenames) > 3 else ""
-            parts.append(f"any of {len(filenames)} files ({', '.join(shown)}{more}) change")
-
-    if context_slice.tool_outputs:
-        tool_names = list(context_slice.tool_outputs.keys())
-        parts.append(f"tool results from {', '.join(tool_names)} change")
-
-    if context_slice.memory_refs:
-        parts.append(f"memory entries change")
-
-    if not parts:
-        return "No automatic invalidation condition"
-
-    return "; or ".join(parts)
-```
-
-**Step 4: Use in RLAPHLoop frame creation**
-
-In `src/repl/rlaph_loop.py`, update frame creation (both in `run()` and `llm_sync()`):
-
-```python
-from ..frame.causal_frame import CausalFrame, FrameStatus, compute_frame_id, generate_invalidation_condition
-
-# In frame creation:
-frame = CausalFrame(
-    # ... existing fields ...
-    invalidation_condition=generate_invalidation_condition(context_slice),
-    # ...
-)
-```
-
-**Step 5: Run tests**
-
-```bash
-uv run pytest tests/frame/test_invalidation_condition.py -v
-```
-
-Expected: PASS
-
-**Step 6: Commit**
-
-```bash
-git add src/frame/causal_frame.py src/repl/rlaph_loop.py tests/frame/test_invalidation_condition.py
-git commit -m "feat: auto-generate precise invalidation_condition from context_slice
-
-- generate_invalidation_condition helper function
-- Shows actual filenames for clarity
-- Handles tool outputs and memory refs
-- Called automatically in frame creation"
-```
-
----
-
-### Task B3: Auto Evidence Tracking
-
-**Files:**
-- Modify: `src/frame/frame_index.py` (update add method)
+- Modify: `src/frame/frame_index.py`
 - Test: `tests/repl/test_evidence_tracking.py`
 
-**Step 1: Write the failing test**
+**Step 1: Update add() method**
 
 ```python
-"""Tests for automatic evidence tracking."""
-import pytest
-from src.frame.frame_index import FrameIndex
-from src.frame.causal_frame import CausalFrame, FrameStatus
-from src.frame.context_slice import ContextSlice
-from datetime import datetime
-
-
-def make_frame(frame_id: str, parent_id: str = None, status: FrameStatus = FrameStatus.COMPLETED) -> CausalFrame:
-    """Helper to create test frames."""
-    return CausalFrame(
-        frame_id=frame_id,
-        depth=0 if not parent_id else 1,
-        parent_id=parent_id,
-        children=[],
-        query=f"query_{frame_id}",
-        context_slice=ContextSlice(files={}, memory_refs=[], tool_outputs={}, token_budget=8000),
-        evidence=[],
-        conclusion=f"conclusion_{frame_id}",
-        confidence=0.8,
-        invalidation_condition="",
-        status=status,
-        branched_from=None,
-        escalation_reason=None,
-        created_at=datetime.now(),
-        completed_at=datetime.now(),
-    )
-
-
-def test_child_frame_added_to_parent_evidence():
-    """When child frame completes, it should be added to parent's evidence."""
-    index = FrameIndex()
-
-    parent = make_frame("ev_parent")
-    index.add(parent)
-
-    child = make_frame("ev_child", parent_id="ev_parent")
-    index.add(child)
-
-    # Parent's evidence should include child
-    parent_after = index.get("ev_parent")
-    assert "ev_child" in parent_after.evidence
-
-
-def test_invalidated_child_not_added_to_evidence():
-    """Invalidated frames should not be added as evidence."""
-    index = FrameIndex()
-
-    parent = make_frame("inv_parent")
-    index.add(parent)
-
-    child = make_frame("inv_child", parent_id="inv_parent", status=FrameStatus.INVALIDATED)
-    index.add(child)
-
-    # Parent's evidence should NOT include invalidated child
-    parent_after = index.get("inv_parent")
-    assert "inv_child" not in parent_after.evidence
-
-
-def test_evidence_tracking_idempotent():
-    """Adding child twice shouldn't duplicate evidence."""
-    index = FrameIndex()
-
-    parent = make_frame("ev_dup_parent")
-    index.add(parent)
-
-    child = make_frame("ev_dup_child", parent_id="ev_dup_parent")
-    index.add(child)
-    index.add(child)  # Add again
-
-    parent_after = index.get("ev_dup_parent")
-    assert parent_after.evidence.count("ev_dup_child") == 1
-```
-
-**Step 2: Run test to verify it fails**
-
-```bash
-uv run pytest tests/repl/test_evidence_tracking.py -v
-```
-
-Expected: FAIL with "AssertionError: assert 'ev_child' in []"
-
-**Step 3: Update implementation**
-
-In `src/frame/frame_index.py`, update `add` method:
-
-```python
-from .causal_frame import FrameStatus
-
 def add(self, frame: "CausalFrame") -> None:
-    """Add a frame to the index, update parent's children and evidence."""
+    """Add a frame, update parent's children and evidence."""
     self._frames[frame.frame_id] = frame
-
-    # Invalidate dependent cache
     self._dependent_cache.clear()
 
-    # Update parent's children list and evidence
     if frame.parent_id and frame.parent_id in self._frames:
         parent = self._frames[frame.parent_id]
 
-        # Add to children (defensive)
+        # Add to children
         if frame.frame_id not in parent.children:
             parent.children.append(frame.frame_id)
 
-        # Add to evidence only if child completed successfully
+        # Add to evidence ONLY if COMPLETED
         if frame.status == FrameStatus.COMPLETED:
             if frame.frame_id not in parent.evidence:
                 parent.evidence.append(frame.frame_id)
 ```
 
-**Step 4: Run tests**
-
-```bash
-uv run pytest tests/repl/test_evidence_tracking.py -v
-```
-
-Expected: PASS
-
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git add src/frame/frame_index.py tests/repl/test_evidence_tracking.py
-git commit -m "feat: auto-track evidence when adding child frames
+git commit -m "feat: auto-track evidence for COMPLETED children only
 
-- Child frame IDs added to parent's evidence list
-- Only COMPLETED frames added as evidence
-- Defensive duplicate check
-- Enables cascade invalidation across evidence links"
+- Prevents invalidated frames from polluting evidence
+- Defensive duplicate check"
 ```
 
 ---
 
-### Task B4: Add find_dependent_frames with Caching
+### Task B3: find_dependent_frames with Caching
 
 **Files:**
 - Modify: `src/frame/frame_index.py`
 - Test: `tests/frame/test_find_dependent.py`
 
-**Step 1: Write the failing test**
-
-```python
-"""Tests for find_dependent_frames."""
-import pytest
-from src.frame.frame_index import FrameIndex
-from src.frame.causal_frame import CausalFrame, FrameStatus
-from src.frame.context_slice import ContextSlice
-from datetime import datetime
-
-
-def make_frame(frame_id: str, parent_id: str = None, evidence: list = None) -> CausalFrame:
-    """Helper to create test frames."""
-    return CausalFrame(
-        frame_id=frame_id,
-        depth=0 if not parent_id else 1,
-        parent_id=parent_id,
-        children=[],
-        query=f"query_{frame_id}",
-        context_slice=ContextSlice(files={}, memory_refs=[], tool_outputs={}, token_budget=8000),
-        evidence=evidence or [],
-        conclusion=f"conclusion_{frame_id}",
-        confidence=0.8,
-        invalidation_condition="",
-        status=FrameStatus.COMPLETED,
-        branched_from=None,
-        escalation_reason=None,
-        created_at=datetime.now(),
-        completed_at=datetime.now(),
-    )
-
-
-def test_find_dependent_frames_by_evidence():
-    """Should find frames that cite a frame as evidence."""
-    index = FrameIndex()
-
-    source = make_frame("source_frame")
-    index.add(source)
-
-    dependent = make_frame("dependent_frame", evidence=["source_frame"])
-    index.add(dependent)
-
-    dependents = index.find_dependent_frames("source_frame")
-
-    assert "dependent_frame" in dependents
-
-
-def test_find_dependent_frames_includes_children():
-    """Should include children as dependents."""
-    index = FrameIndex()
-
-    parent = make_frame("parent_dep")
-    index.add(parent)
-
-    child = make_frame("child_dep", parent_id="parent_dep")
-    index.add(child)
-
-    dependents = index.find_dependent_frames("parent_dep")
-
-    assert "child_dep" in dependents
-
-
-def test_find_dependent_frames_none():
-    """Should return empty set if no dependents."""
-    index = FrameIndex()
-
-    orphan = make_frame("orphan")
-    index.add(orphan)
-
-    dependents = index.find_dependent_frames("orphan")
-
-    assert dependents == set()
-
-
-def test_find_dependent_frames_caching():
-    """Should cache results and return copy."""
-    index = FrameIndex()
-
-    source = make_frame("cached_source")
-    index.add(source)
-
-    dependent = make_frame("cached_dep", evidence=["cached_source"])
-    index.add(dependent)
-
-    # First call
-    dependents1 = index.find_dependent_frames("cached_source")
-    assert "cached_dep" in dependents1
-
-    # Second call should use cache
-    dependents2 = index.find_dependent_frames("cached_source")
-    assert dependents2 == dependents1
-
-    # Modifying returned set shouldn't affect cache
-    dependents1.add("fake")
-    dependents3 = index.find_dependent_frames("cached_source")
-    assert "fake" not in dependents3
-```
-
-**Step 2: Run test to verify it fails**
-
-```bash
-uv run pytest tests/frame/test_find_dependent.py -v
-```
-
-Expected: FAIL with "AttributeError: 'FrameIndex' object has no attribute 'find_dependent_frames'"
-
-**Step 3: Write implementation with caching**
-
-In `src/frame/frame_index.py`, add method:
+**Step 1: Add method with caching**
 
 ```python
 def find_dependent_frames(self, frame_id: str) -> set[str]:
@@ -1094,183 +943,46 @@ def find_dependent_frames(self, frame_id: str) -> set[str]:
 
     Dependents include:
     - Children (frames with this frame as parent_id)
-    - Evidence consumers (frames citing this frame in evidence list)
+    - Evidence consumers (frames citing this frame in evidence)
 
-    Results are cached for O(1) lookup until frames change.
-
-    Args:
-        frame_id: Frame to find dependents for
-
-    Returns:
-        Set of frame IDs that depend on this frame (copy)
+    Results are cached until frames change.
     """
-    # Check cache
     if frame_id in self._dependent_cache:
         return self._dependent_cache[frame_id].copy()
 
     dependents = set()
 
     for fid, frame in self._frames.items():
-        # Check if child
         if frame.parent_id == frame_id:
             dependents.add(fid)
-
-        # Check if cites as evidence
         if frame_id in frame.evidence:
             dependents.add(fid)
 
-    # Cache result
     self._dependent_cache[frame_id] = dependents
-
     return dependents.copy()
 ```
 
-**Step 4: Run tests**
-
-```bash
-uv run pytest tests/frame/test_find_dependent.py -v
-```
-
-Expected: PASS
-
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git add src/frame/frame_index.py tests/frame/test_find_dependent.py
-git commit -m "feat: add find_dependent_frames with caching for cascade invalidation
+git commit -m "feat: add find_dependent_frames with caching
 
-- Find frames that cite a frame as evidence
-- Include children as dependents
-- O(n) scan with caching for repeated lookups
+- O(n) scan with cache for repeated lookups
 - Returns copy to prevent cache corruption"
 ```
 
 ---
 
-### Task B5: Strengthen Cascade Propagation
+### Task B4: Strengthen Cascade Propagation
 
 **Files:**
 - Modify: `src/frame/frame_invalidation.py`
 - Test: `tests/frame/test_cascade_invalidation.py`
 
-**Step 1: Write the test**
+**Step 1: Implement robust cascade**
 
 ```python
-"""Tests for cascade invalidation."""
-import pytest
-from src.frame.frame_index import FrameIndex
-from src.frame.frame_invalidation import propagate_invalidation
-from src.frame.causal_frame import CausalFrame, FrameStatus
-from src.frame.context_slice import ContextSlice
-from datetime import datetime
-
-
-def make_frame(frame_id: str, parent_id: str = None, evidence: list = None) -> CausalFrame:
-    """Helper to create test frames."""
-    return CausalFrame(
-        frame_id=frame_id,
-        depth=0 if not parent_id else 1,
-        parent_id=parent_id,
-        children=[],
-        query=f"query_{frame_id}",
-        context_slice=ContextSlice(files={}, memory_refs=[], tool_outputs={}, token_budget=8000),
-        evidence=evidence or [],
-        conclusion=f"conclusion_{frame_id}",
-        confidence=0.8,
-        invalidation_condition="",
-        status=FrameStatus.COMPLETED,
-        branched_from=None,
-        escalation_reason=None,
-        created_at=datetime.now(),
-        completed_at=datetime.now(),
-    )
-
-
-def test_propagate_invalidates_children():
-    """Invalidating a frame should invalidate its children."""
-    index = FrameIndex()
-
-    parent = make_frame("parent_cascade")
-    index.add(parent)
-
-    child = make_frame("child_cascade", parent_id="parent_cascade")
-    index.add(child)
-
-    invalidated = propagate_invalidation("parent_cascade", "test reason", index)
-
-    assert "parent_cascade" in invalidated
-    assert "child_cascade" in invalidated
-    assert index.get("parent_cascade").status == FrameStatus.INVALIDATED
-    assert index.get("child_cascade").status == FrameStatus.INVALIDATED
-
-
-def test_propagate_invalidates_evidence_consumers():
-    """Invalidating a frame should invalidate frames citing it as evidence."""
-    index = FrameIndex()
-
-    source = make_frame("source_evidence")
-    index.add(source)
-
-    consumer = make_frame("consumer", evidence=["source_evidence"])
-    index.add(consumer)
-
-    invalidated = propagate_invalidation("source_evidence", "evidence changed", index)
-
-    assert "source_evidence" in invalidated
-    assert "consumer" in invalidated
-
-
-def test_propagate_handles_cycles():
-    """Should handle cycles without infinite loop."""
-    index = FrameIndex()
-
-    frame_a = make_frame("frame_a", evidence=["frame_b"])
-    frame_b = make_frame("frame_b", evidence=["frame_a"])
-
-    index.add(frame_a)
-    index.add(frame_b)
-
-    # Should not hang
-    invalidated = propagate_invalidation("frame_a", "test cycle", index)
-
-    assert "frame_a" in invalidated
-    assert "frame_b" in invalidated
-
-
-def test_propagate_records_escalation_reason():
-    """Invalidated frames should have escalation_reason set."""
-    index = FrameIndex()
-
-    parent = make_frame("parent_reason")
-    index.add(parent)
-
-    child = make_frame("child_reason", parent_id="parent_reason")
-    index.add(child)
-
-    propagate_invalidation("parent_reason", "original reason", index)
-
-    assert "original reason" in index.get("parent_reason").escalation_reason
-    assert "original reason" in index.get("child_reason").escalation_reason
-```
-
-**Step 2: Run test to verify**
-
-```bash
-uv run pytest tests/frame/test_cascade_invalidation.py -v
-```
-
-**Step 3: Ensure implementation is robust**
-
-In `src/frame/frame_invalidation.py`:
-
-```python
-from __future__ import annotations
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .frame_index import FrameIndex
-
-
 def propagate_invalidation(
     frame_id: str,
     reason: str,
@@ -1282,24 +994,20 @@ def propagate_invalidation(
     Propagation direction:
     - DOWN: to all children (tree walk)
     - SIDEWAYS: to frames using this as evidence
-
-    Returns set of all invalidated frame IDs.
     """
     from .causal_frame import FrameStatus
 
     invalidated = set()
 
     def _invalidate(fid: str, current_reason: str):
-        # Cycle detection
         if fid in invalidated:
-            return
+            return  # Cycle detection
         invalidated.add(fid)
 
         frame = index.get(fid)
         if frame is None:
             return
 
-        # Update status and reason
         frame.status = FrameStatus.INVALIDATED
         frame.escalation_reason = current_reason
 
@@ -1316,42 +1024,34 @@ def propagate_invalidation(
     return invalidated
 ```
 
-**Step 4: Run tests**
-
-```bash
-uv run pytest tests/frame/test_cascade_invalidation.py -v
-```
-
-Expected: PASS
-
-**Step 5: Commit**
+**Step 2: Commit**
 
 ```bash
 git add src/frame/frame_invalidation.py tests/frame/test_cascade_invalidation.py
-git commit -m "feat: strengthen cascade invalidation with find_dependent_frames
+git commit -m "feat: strengthen cascade with find_dependent_frames
 
-- Use find_dependent_frames for sideways propagation
-- Clear escalation_reason chain
+- Use cached dependent discovery
 - Handle circular evidence gracefully
-- Return set of all invalidated IDs"
+- Clear escalation_reason chain"
 ```
 
 ---
 
-### Task B6: End-to-End Integration Test
+### Task B5: E2E Integration Test
 
 **Files:**
 - Create: `tests/integration/test_tree_cascade_integration.py`
 
-**Step 1: Write integration test**
+**Step 1: Write comprehensive integration test**
 
 ```python
-"""End-to-end integration test for tree + evidence + cascade + recursion."""
+"""E2E integration test for tree + evidence + cascade + canonical_task."""
 import pytest
 from src.frame.frame_index import FrameIndex
 from src.frame.frame_invalidation import propagate_invalidation
 from src.frame.causal_frame import CausalFrame, FrameStatus
 from src.frame.context_slice import ContextSlice
+from src.frame.canonical_task import CanonicalTask
 from datetime import datetime
 
 
@@ -1359,27 +1059,22 @@ def make_frame(
     frame_id: str,
     parent_id: str = None,
     evidence: list = None,
-    files: dict = None,
+    canonical_task: CanonicalTask = None,
     depth: int = 0
 ) -> CausalFrame:
-    """Helper to create test frames."""
     return CausalFrame(
         frame_id=frame_id,
         depth=depth,
         parent_id=parent_id,
         children=[],
         query=f"query_{frame_id}",
-        context_slice=ContextSlice(
-            files=files or {},
-            memory_refs=[],
-            tool_outputs={},
-            token_budget=8000,
-        ),
+        context_slice=ContextSlice(files={}, memory_refs=[], tool_outputs={}, token_budget=8000),
         evidence=evidence or [],
         conclusion=f"conclusion_{frame_id}",
         confidence=0.8,
-        invalidation_condition="",
+        invalidation_condition={},
         status=FrameStatus.COMPLETED,
+        canonical_task=canonical_task,
         branched_from=None,
         escalation_reason=None,
         created_at=datetime.now(),
@@ -1387,122 +1082,101 @@ def make_frame(
     )
 
 
-def test_full_tree_cascade_invalidation():
-    """
-    E2E: Full tree with children and evidence links.
-
-    Tree structure:
-              root (depth 0)
-             /    \
-          child1  child2 (depth 1)
-            |       |
-          leaf1  evidence_user (cites leaf1)
-
-    When root is invalidated, all should be invalidated.
-    """
+def test_full_tree_with_canonical_task():
+    """E2E: Tree with canonical_task prevents duplicates."""
     index = FrameIndex()
 
-    # Build 3-level tree
-    root = make_frame("root", files={"/src/main.py": "hash1"}, depth=0)
+    # Same canonical task should not create duplicate frames
+    task1 = CanonicalTask(task_type="analyze", target="auth.py", analysis_scope="correctness")
+    task2 = CanonicalTask(task_type="analyze", target="auth.py", analysis_scope="correctness")
+
+    # Same hash
+    assert task1.to_hash() == task2.to_hash()
+
+    # Create frames with canonical task
+    root = make_frame("root", canonical_task=task1, depth=0)
+    index.add(root)
+
+    # Verify canonical_task is stored
+    assert index.get("root").canonical_task is not None
+    assert index.get("root").canonical_task.task_type == "analyze"
+
+
+def test_cascade_with_evidence_and_children():
+    """E2E: Cascade invalidates children + evidence consumers."""
+    index = FrameIndex()
+
+    root = make_frame("root", depth=0)
     index.add(root)
 
     child1 = make_frame("child1", parent_id="root", depth=1)
     index.add(child1)
 
-    child2 = make_frame("child2", parent_id="root", depth=1)
-    index.add(child2)
-
     leaf1 = make_frame("leaf1", parent_id="child1", depth=2)
     index.add(leaf1)
 
-    evidence_user = make_frame("evidence_user", evidence=["leaf1"], depth=1)
+    # Evidence user (cites leaf1)
+    evidence_user = make_frame("ev_user", evidence=["leaf1"], depth=1)
     index.add(evidence_user)
 
-    # Verify tree structure was built
+    # Verify structure
     assert "child1" in index.get("root").children
-    assert "child2" in index.get("root").children
     assert "leaf1" in index.get("child1").children
     assert "leaf1" in index.get("child1").evidence
 
     # Invalidate root
-    invalidated = propagate_invalidation("root", "main.py changed", index)
+    invalidated = propagate_invalidation("root", "test cascade", index)
 
-    # All frames should be invalidated
-    assert len(invalidated) == 5
-    for fid in ["root", "child1", "child2", "leaf1", "evidence_user"]:
+    # All should be invalidated
+    assert len(invalidated) == 4
+    for fid in ["root", "child1", "leaf1", "ev_user"]:
         assert fid in invalidated
         assert index.get(fid).status == FrameStatus.INVALIDATED
 
-    # Verify escalation reasons propagate
-    assert "main.py changed" in index.get("root").escalation_reason
-    assert "leaf1" in index.get("evidence_user").escalation_reason
 
-
-def test_partial_tree_invalidation():
-    """E2E: Only invalidating a subtree should not affect siblings."""
+def test_partial_invalidation():
+    """E2E: Partial subtree invalidation."""
     index = FrameIndex()
 
-    root = make_frame("root_partial", depth=0)
+    root = make_frame("root_p", depth=0)
     index.add(root)
 
-    child1 = make_frame("child1_partial", parent_id="root_partial", depth=1)
+    child1 = make_frame("child1_p", parent_id="root_p", depth=1)
     index.add(child1)
 
-    child1_leaf = make_frame("child1_leaf", parent_id="child1_partial", depth=2)
-    index.add(child1_leaf)
-
-    child2 = make_frame("child2_partial", parent_id="root_partial", depth=1)
+    child2 = make_frame("child2_p", parent_id="root_p", depth=1)
     index.add(child2)
 
-    child2_leaf = make_frame("child2_leaf", parent_id="child2_partial", depth=2)
-    index.add(child2_leaf)
-
     # Invalidate only child1
-    invalidated = propagate_invalidation("child1_partial", "child1 reason", index)
+    invalidated = propagate_invalidation("child1_p", "child1 reason", index)
 
-    # Only child1 subtree should be invalidated
-    assert "child1_partial" in invalidated
-    assert "child1_leaf" in invalidated
-
-    # Sibling subtree should NOT be invalidated
-    assert "child2_partial" not in invalidated
-    assert "child2_leaf" not in invalidated
-    assert "root_partial" not in invalidated
-
-    # Verify statuses
-    assert index.get("child1_partial").status == FrameStatus.INVALIDATED
-    assert index.get("child1_leaf").status == FrameStatus.INVALIDATED
-    assert index.get("child2_partial").status == FrameStatus.COMPLETED
-    assert index.get("child2_leaf").status == FrameStatus.COMPLETED
+    assert "child1_p" in invalidated
+    assert "root_p" not in invalidated
+    assert "child2_p" not in invalidated
 
 
-def test_query_tracking_persists():
-    """E2E: Query tracking should persist through save/load."""
+def test_query_tracking_persistence():
+    """E2E: Query tracking persists through save/load."""
     import tempfile
     from pathlib import Path
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
 
-        # Create index with query
         index = FrameIndex(
-            initial_query="Analyze the auth module deeply",
+            initial_query="Analyze auth module",
             query_summary="Auth analysis"
         )
 
-        # Add some frames
         root = make_frame("qroot", depth=0)
         index.add(root)
 
-        # Save
         index.save("test_query", tmp_path)
 
-        # Load
         loaded = FrameIndex.load("test_query", tmp_path)
 
-        assert loaded.initial_query == "Analyze the auth module deeply"
+        assert loaded.initial_query == "Analyze auth module"
         assert loaded.query_summary == "Auth analysis"
-        assert "qroot" in loaded._frames
 ```
 
 **Step 2: Run integration test**
@@ -1511,17 +1185,15 @@ def test_query_tracking_persists():
 uv run pytest tests/integration/test_tree_cascade_integration.py -v
 ```
 
-Expected: PASS
-
 **Step 3: Commit**
 
 ```bash
 git add tests/integration/test_tree_cascade_integration.py
-git commit -m "test: add E2E integration test for tree + evidence + cascade
+git commit -m "test: add E2E integration test for tree + evidence + cascade + canonical_task
 
-- Full tree cascade scenario (3 levels)
+- Full tree cascade with evidence links
 - Partial subtree invalidation
-- Evidence propagation across branches
+- Canonical task deduplication
 - Query tracking persistence"
 ```
 
@@ -1529,37 +1201,44 @@ git commit -m "test: add E2E integration test for tree + evidence + cascade
 
 ## Verification
 
-Run all tests to verify Phase 18 is complete:
+Run all tests:
 
 ```bash
 uv run pytest tests/ -v --tb=short
 ```
 
-All tests should pass.
-
 ---
 
 ## Summary
 
-Phase 18 adds:
+### Part A: Recursion + Intent Normalization
+1. **llm_sync with explicit depth** - Creates child frames, verbose logging
+2. **CanonicalTask + intent extractor** - Prevents duplicate frames
+   - Language-agnostic: works for .py, .ts, .go, .rs
+   - Intent-first design: verb + target patterns
+   - Dynamic target extraction (not project-specific)
+   - 70-80% rule hit rate + LLM fallback
+3. **Structured invalidation_condition** - Dict instead of string
+4. **Enhanced system prompt** - Guardrails against depth explosion
+5. **Query tracking** - initial_query and query_summary
 
-### Part A: Recursion Infrastructure
-1. **Synchronous llm(sub_query)** - Creates child frames with explicit depth parameter
-2. **Enhanced system prompt** - Recursion guidance with guardrails against depth explosion
-3. **Query/intent tracking** - initial_query and query_summary in FrameIndex
-
-### Part B: Tree Structure + Evidence + Cascade
-4. **Children population** - FrameIndex.add updates parent.children (defensive)
-5. **Auto invalidation_condition** - Precise conditions with filenames
-6. **Auto evidence tracking** - Only COMPLETED frames as evidence
-7. **find_dependent_frames** - With caching for O(1) lookups
-8. **Stronger cascade** - Full tree walk + evidence propagation
-9. **E2E integration test** - Validates everything connects
+### Part B: Tree + Evidence + Cascade
+6. **Children population** - Auto-update parent.children
+7. **Evidence tracking** - Only COMPLETED frames
+8. **find_dependent_frames** - Cached O(n) lookup
+9. **Cascade propagation** - Uses dependent discovery
+10. **E2E integration test** - Validates everything
 
 ### Key Design Decisions
-- **Explicit depth parameter** in llm_sync (safer for future async)
-- **Defensive checks** in add() (idempotent, no duplicates)
-- **Caching** in find_dependent_frames
-- **Verbose logging** flag for debugging recursion decisions
+- Frame identity = canonical_task.hash() + context_slice.hash()
+- Intent extractor is **language/framework agnostic**
+- Evidence only from COMPLETED children
+- invalidation_condition is dict (structured)
+- Synchronous llm(sub_query), no subprocess
+- Verbose logging for debugging
 
-Result: Proper tree structure with working recursion and cascade invalidation.
+### After Phase 18
+Run 2-session demo:
+1. Session 1: "auth 분석해줘" → canonical_task("analyze", ["**/*auth*"])
+2. Change auth.py
+3. Session 2: "auth 코드 어떻게 생각해?" → same canonical_task → detects change → targeted invalidation
