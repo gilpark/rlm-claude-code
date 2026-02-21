@@ -232,6 +232,9 @@ async def cmd_status(topic: str | None, args: dict) -> str:
     use_icons = config.status_icons
 
     session_id = get_session_id(args)
+    if not session_id:
+        return "No session found. Run `/causal analyze` first to create a session."
+
     index = FrameIndex.load(session_id)
 
     if not index or len(index) == 0:
@@ -331,6 +334,9 @@ async def cmd_tree(args: dict) -> str:
         Tree visualization text
     """
     session_id = get_session_id(args)
+    if not session_id:
+        return "No session found. Run `/causal analyze` first."
+
     index = FrameIndex.load(session_id)
 
     if not index or len(index) == 0:
@@ -374,6 +380,9 @@ async def cmd_resume(frame_id: str | None, args: dict) -> str:
         Resume operation result text
     """
     session_id = get_session_id(args)
+    if not session_id:
+        return "No session found. Run `/causal analyze` first."
+
     index = FrameIndex.load(session_id)
 
     if not index:
